@@ -17,9 +17,9 @@
 #include <vector>
 
 struct ConstantBufferData {
-    Uint32 quantMat[8][8];
     Uint32 frameWidth;
     Uint32 frameHeight;
+    Uint32 quantMat[8][8];
 };
 
 int main(int argc, char** args) {
@@ -220,7 +220,7 @@ int main(int argc, char** args) {
             SDL_GPURasterizerState rasterState{};
              rasterState.cull_mode = SDL_GPU_CULLMODE_BACK;
             rasterState.fill_mode = SDL_GPU_FILLMODE_FILL;
-            rasterState.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
+            rasterState.front_face = SDL_GPU_FRONTFACE_CLOCKWISE;
             return rasterState;
         }();
         graphicsPipelineInfo.target_info = [&] {
@@ -403,7 +403,7 @@ int main(int argc, char** args) {
         SDL_GPUSamplerCreateInfo samplerInfo = {};
         samplerInfo.min_filter = SDL_GPU_FILTER_LINEAR;
         samplerInfo.mag_filter = SDL_GPU_FILTER_LINEAR;
-        samplerInfo.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
+        samplerInfo.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_LINEAR;
         samplerInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_MIRRORED_REPEAT;
         samplerInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_MIRRORED_REPEAT;
         samplerInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_MIRRORED_REPEAT;
@@ -430,8 +430,13 @@ int main(int argc, char** args) {
         SDL_GPUTransferBufferCreateInfo txBufferInfo;
             txBufferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
             txBufferInfo.size = webcamYuvFrameSizeBytes;
+            txBufferInfo.props = 0;
         return SDL_CreateGPUTransferBuffer(gpu, &txBufferInfo);
     }();
+    if (txBuffer == nullptr) {
+        spdlog::error("Could not create image upload buffer! Error: {}", SDL_GetError());
+        exit(-1);
+    }
 
     bool shouldExit = false;
     while (!shouldExit) {
@@ -440,6 +445,7 @@ int main(int argc, char** args) {
             switch (events.type) {
                 case SDL_EVENT_QUIT:
                     shouldExit = true;
+                    break;
                 default:
                     break;
             }

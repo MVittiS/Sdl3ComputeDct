@@ -1,7 +1,7 @@
 struct ProcessingParams {
-    uint quantMatrix[8][8];
     uint frameWidth;
     uint frameHeight;
+    uint quantMatrix[8][8];
 };
 
 ByteAddressBuffer inputRawYuvFrame      : register(t0, space0);
@@ -23,9 +23,9 @@ float QuantizeFloat(float x, uint quantFactor) {
 
 [numthreads(8, 8, 1)]
 void CSMain(uint3 globalId : SV_DispatchThreadId, uint3 localId : SV_GroupThreadID) {
-    if (any(globalId.xy >= uint2(params.frameWidth, params.frameHeight))) {
-        return;
-    }
+    // if (any(globalId.xy >= uint2(params.frameWidth, params.frameHeight))) {
+    //     return;
+    // }
 
     const float invSqrt8 = 1.0f/sqrt(8.0f);
     const float invSqrt4 = 0.5;
@@ -55,17 +55,17 @@ void CSMain(uint3 globalId : SV_DispatchThreadId, uint3 localId : SV_GroupThread
     };
 
     // Stage 1 - loading shared memory with 4Y, 1U, and 1V tiles
-    const uint linearYIndex = dot(globalId.xy * 2, uint2(1, params.frameWidth));
-    const uint linearUVOffset = params.frameWidth * params.frameHeight;
-    const uint linearUVIndex = linearUVOffset + dot(globalId.xy, uint2(2, params.frameWidth / 2));
+    const uint linearYIndex = dot(globalId.xy * 2, uint2(1, params.frameWidth)) / 4; // ByteAddressBuffer reads uint32
+    const uint linearUVOffset = params.frameWidth * params.frameHeight / 4;
+    const uint linearUVIndex = linearUVOffset + dot(globalId.xy, uint2(2, params.frameWidth / 2)) / 4;
 
-    y[2 * localId.y + 0][2 * localId.x + 0] = inputRawYuvFrame.Load(linearYIndex + 0);
-    y[2 * localId.y + 0][2 * localId.x + 1] = inputRawYuvFrame.Load(linearYIndex + 1);
-    y[2 * localId.y + 1][2 * localId.x + 0] = inputRawYuvFrame.Load(linearYIndex + params.frameWidth + 0);
-    y[2 * localId.y + 1][2 * localId.x + 1] = inputRawYuvFrame.Load(linearYIndex + params.frameWidth + 1);
+    y[2 * localId.y + 0][2 * localId.x + 0] = (inputRawYuvFrame.Load(linearYIndex) >> 0) & 0xFFu;
+    y[2 * localId.y + 0][2 * localId.x + 1] = (inputRawYuvFrame.Load(linearYIndex) >> 8) & 0xFFu;
+    y[2 * localId.y + 1][2 * localId.x + 0] = (inputRawYuvFrame.Load(linearYIndex + params.frameWidth / 4) >> 0) & 0xFFu;
+    y[2 * localId.y + 1][2 * localId.x + 1] = (inputRawYuvFrame.Load(linearYIndex + params.frameWidth / 4) >> 8) & 0xFFu;
 
-    u[localId.y][localId.x] = inputRawYuvFrame.Load(linearUVIndex + 0);
-    v[localId.y][localId.x] = inputRawYuvFrame.Load(linearUVIndex + 0);
+    u[localId.y][localId.x] = (inputRawYuvFrame.Load(linearUVIndex) >> 0) & 0xFFu;
+    v[localId.y][localId.x] = (inputRawYuvFrame.Load(linearUVIndex) >> 8) & 0xFFu;
 
     GroupMemoryBarrierWithGroupSync();
 
@@ -133,8 +133,15 @@ void CSMain(uint3 globalId : SV_DispatchThreadId, uint3 localId : SV_GroupThread
     const float normFactor = 1.0f/255.0f;
 
     // Now, let each thread write to the texture.
+#if 0
     outputTexture[(2 * globalId.xy) + x0y0] = float3(localY[0], localU, localV) * normFactor;
     outputTexture[(2 * globalId.xy) + x1y0] = float3(localY[1], localU, localV) * normFactor;
     outputTexture[(2 * globalId.xy) + x0y1] = float3(localY[2], localU, localV) * normFactor;
     outputTexture[(2 * globalId.xy) + x1y1] = float3(localY[3], localU, localV) * normFactor;
+#else
+    outputTexture[(2 * globalId.xy) + x0y0] = float3(y[2 * localId.y + 0][2 * localId.x + 0], u[localId.y][localId.x], v[localId.y][localId.x]) * normFactor;
+    outputTexture[(2 * globalId.xy) + x1y0] = float3(y[2 * localId.y + 0][2 * localId.x + 1], u[localId.y][localId.x], v[localId.y][localId.x]) * normFactor;
+    outputTexture[(2 * globalId.xy) + x0y1] = float3(y[2 * localId.y + 1][2 * localId.x + 0], u[localId.y][localId.x], v[localId.y][localId.x]) * normFactor;
+    outputTexture[(2 * globalId.xy) + x1y1] = float3(y[2 * localId.y + 1][2 * localId.x + 1], u[localId.y][localId.x], v[localId.y][localId.x]) * normFactor;
+#endif
 }
