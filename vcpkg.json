@@ -1,0 +1,10 @@
+{
+    "dependencies": [
+        {
+            "name": "sdl3",
+            "version>=": "3.2.28"
+        },
+        "spdlog"
+    ],
+    "builtin-baseline": "5d57f5a0a5469a23e005fc79a7c1814ab4fc967e"
+}
