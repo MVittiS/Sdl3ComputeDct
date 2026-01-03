@@ -11,10 +11,10 @@ VertexOut VSMain(uint vid : SV_VERTEXID) {
         1, 1, 0, 1
     );
     const float4x2 texCoords = float4x2(
-        0, 0,
-        0, 1,
+        1, 1,
         1, 0,
-        1, 1
+        0, 1,
+        0, 0
     );
 
     VertexOut vOut;

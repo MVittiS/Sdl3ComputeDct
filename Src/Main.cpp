@@ -19,6 +19,7 @@
 struct ConstantBufferData {
     Uint32 frameWidth;
     Uint32 frameHeight;
+    Uint32 rowWordStride;
     Uint32 quantMat[8][8];
 };
 
@@ -112,6 +113,7 @@ int main(int argc, char** args) {
     }
     cbufData.frameWidth = webcamFormat.width;
     cbufData.frameHeight = webcamFormat.height;
+    cbufData.rowWordStride = webcamFormat.width / 4;
 
     // Now, create window, swapchain texture, and pipelines.
     SDL_Window* window = SDL_CreateWindow("FriedCamera", 1280, 720, /*SDL_WINDOW_HIGH_PIXEL_DENSITY*/ 0);
@@ -238,23 +240,12 @@ int main(int argc, char** args) {
             tgtInfo.num_color_targets = 1;
             tgtInfo.color_target_descriptions = &tgtDesc;
             tgtInfo.has_depth_stencil_target = false;
-            // tgtInfo.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
             return tgtInfo;
         }();
 
         graphicsPipelineInfo.vertex_input_state.num_vertex_buffers = 0;
         graphicsPipelineInfo.vertex_input_state.num_vertex_attributes = 0;
 
-        // static constexpr auto vertexBufferDesc = [&] { 
-        //     SDL_GPUVertexBufferDescription bufferDesc{};
-        //     bufferDesc.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
-        //     bufferDesc.instance_step_rate = 0;
-        //     bufferDesc.pitch = sizeof(float) * 8;
-        //     bufferDesc.slot = 0;
-
-        //     return bufferDesc;
-        // }();
-        // graphicsPipelineInfo.vertex_input_state.vertex_buffer_descriptions = &vertexBufferDesc;
         graphicsPipelineInfo.vertex_input_state.vertex_buffer_descriptions = nullptr;
 
 #if 0
@@ -437,8 +428,29 @@ int main(int argc, char** args) {
         spdlog::error("Could not create image upload buffer! Error: {}", SDL_GetError());
         exit(-1);
     }
+    
+#if 0 // Debug: capture images in advance so that we can close the camera when not in use.
+    for (int frame = 0; frame < 100; ++frame) {
+        Uint64 frameTimestamp;
+        SDL_Surface* cpuCameraSurface = SDL_AcquireCameraFrame(webcam, &frameTimestamp);
+        if (cpuCameraSurface == nullptr) {
+            SDL_Delay(5);
+            continue;
+        }
+        
+        {
+            auto* txPointer = static_cast<Uint8*>(SDL_MapGPUTransferBuffer(gpu, txBuffer, false));
+            std::copy_n(static_cast<const Uint8*>(cpuCameraSurface->pixels), webcamYuvFrameSizeBytes, txPointer);
+            SDL_UnmapGPUTransferBuffer(gpu, txBuffer);
+        }
+        SDL_ReleaseCameraFrame(webcam, cpuCameraSurface);
+    }
+    SDL_CloseCamera(webcam);
+#endif
+    
 
     bool shouldExit = false;
+    SDL_GPUFence* frameFence = nullptr;
     while (!shouldExit) {
         SDL_Event events;
         while(SDL_PollEvent(&events)) {
@@ -451,6 +463,12 @@ int main(int argc, char** args) {
             }
         }
 
+        if (frameFence) {
+            SDL_WaitForGPUFences(gpu, true, &frameFence, 1);
+            SDL_ReleaseGPUFence(gpu, frameFence);
+            frameFence = nullptr;
+        }
+#if 1
         Uint64 frameTimestamp;
         SDL_Surface* cpuCameraSurface = SDL_AcquireCameraFrame(webcam, &frameTimestamp);
         if (cpuCameraSurface == nullptr) {
@@ -464,7 +482,8 @@ int main(int argc, char** args) {
             SDL_UnmapGPUTransferBuffer(gpu, txBuffer);
         }
         SDL_ReleaseCameraFrame(webcam, cpuCameraSurface);
-
+#endif
+        
         SDL_GPUTexture* swapchainTexture;
         Uint32 swapchainWidth, swapchainHeight;
         SDL_GPUCommandBuffer* frameCmdBuf = SDL_AcquireGPUCommandBuffer(gpu); {
@@ -536,7 +555,7 @@ int main(int argc, char** args) {
                 static constexpr Uint32 firstInstance = 0;
                 SDL_DrawGPUPrimitives(gfxPass, numVerts, numInstances, firstVert, firstInstance);
             } SDL_EndGPURenderPass(gfxPass);
-        } SDL_SubmitGPUCommandBuffer(frameCmdBuf);
+        } frameFence = SDL_SubmitGPUCommandBufferAndAcquireFence(frameCmdBuf);
     }
 
     SDL_ReleaseGPUComputePipeline(gpu, computePipe);

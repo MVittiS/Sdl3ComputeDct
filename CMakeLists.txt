@@ -250,7 +250,7 @@ target_include_directories(ComputeDct
 )
 target_compile_options(ComputeDct
     PRIVATE
-        -fsanitize=address
+        -fsanitize=address,undefined
 )
 target_link_libraries(ComputeDct
     PRIVATE
@@ -259,7 +259,7 @@ target_link_libraries(ComputeDct
 )
 target_link_options(ComputeDct
     PRIVATE
-        -fsanitize=address
+        -fsanitize=address,undefined
 )
 add_dependencies(ComputeDct
     Shaders

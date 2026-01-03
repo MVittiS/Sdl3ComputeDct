@@ -1,6 +1,7 @@
 struct ProcessingParams {
     uint frameWidth;
     uint frameHeight;
+    uint rowWordStride;
     uint quantMatrix[8][8];
 };
 
@@ -22,11 +23,10 @@ float QuantizeFloat(float x, uint quantFactor) {
 }
 
 [numthreads(8, 8, 1)]
-void CSMain(uint3 globalId : SV_DispatchThreadId, uint3 localId : SV_GroupThreadID) {
-    // if (any(globalId.xy >= uint2(params.frameWidth, params.frameHeight))) {
-    //     return;
-    // }
-
+void CSMain(uint3 globalId : SV_DispatchThreadId
+    , uint3 localId : SV_GroupThreadID
+    , uint3 blockId : SV_GroupId
+) {
     const float invSqrt8 = 1.0f/sqrt(8.0f);
     const float invSqrt4 = 0.5;
 
@@ -55,17 +55,42 @@ void CSMain(uint3 globalId : SV_DispatchThreadId, uint3 localId : SV_GroupThread
     };
 
     // Stage 1 - loading shared memory with 4Y, 1U, and 1V tiles
-    const uint linearYIndex = dot(globalId.xy * 2, uint2(1, params.frameWidth)) / 4; // ByteAddressBuffer reads uint32
-    const uint linearUVOffset = params.frameWidth * params.frameHeight / 4;
-    const uint linearUVIndex = linearUVOffset + dot(globalId.xy, uint2(2, params.frameWidth / 2)) / 4;
+    // DEBUG: load only Y values. Each thread loads 4 values, so first 4 threads read entire 16-element row,
+    //  with 16 rows being read each by 4 threads. These values are all put in shared memory.
+    
+    /* Should load:
+    /        0    1    2    3    4    5    6    7
+    /   0    0    4    8   12 1920 1924 1928 1932
+    /   1 3840 3844 ...
+    /   2
+    /   3
+    /   4
+    /   5
+    /   6
+    /   7
+    */
+    const bool isOddRow = (localId.x >= 4);
+    const uint rowOffset = ((localId.x % 4) + (isOddRow ? params.rowWordStride : 0)) * 4
+        + (blockId.x * 16);
+    const uint colOffset = globalId.y * params.rowWordStride * 8;
+    const uint yValues = inputRawYuvFrame.Load(rowOffset + colOffset);
 
-    y[2 * localId.y + 0][2 * localId.x + 0] = (inputRawYuvFrame.Load(linearYIndex) >> 0) & 0xFFu;
-    y[2 * localId.y + 0][2 * localId.x + 1] = (inputRawYuvFrame.Load(linearYIndex) >> 8) & 0xFFu;
-    y[2 * localId.y + 1][2 * localId.x + 0] = (inputRawYuvFrame.Load(linearYIndex + params.frameWidth / 4) >> 0) & 0xFFu;
-    y[2 * localId.y + 1][2 * localId.x + 1] = (inputRawYuvFrame.Load(linearYIndex + params.frameWidth / 4) >> 8) & 0xFFu;
+    const bool isLocalOddRow = (localId.x >= 4);
+    const uint localRowToStore = 2 * localId.y + uint(isLocalOddRow);
+    const uint localColToStore = 4 * (localId.x - (isLocalOddRow ? 4 : 0));
 
+    y[localRowToStore][localColToStore + 0] = ((yValues >>  0) & 0xFF) * (1.0f / 255.0f);
+    y[localRowToStore][localColToStore + 1] = ((yValues >>  8) & 0xFF) * (1.0f / 255.0f);
+    y[localRowToStore][localColToStore + 2] = ((yValues >> 16) & 0xFF) * (1.0f / 255.0f);
+    y[localRowToStore][localColToStore + 3] = ((yValues >> 24) & 0xFF) * (1.0f / 255.0f);
+
+#if 0
     u[localId.y][localId.x] = (inputRawYuvFrame.Load(linearUVIndex) >> 0) & 0xFFu;
     v[localId.y][localId.x] = (inputRawYuvFrame.Load(linearUVIndex) >> 8) & 0xFFu;
+#else
+    u[localId.y][localId.x] = 0;
+    v[localId.y][localId.x] = 0;
+#endif
 
     GroupMemoryBarrierWithGroupSync();
 
@@ -139,9 +164,14 @@ void CSMain(uint3 globalId : SV_DispatchThreadId, uint3 localId : SV_GroupThread
     outputTexture[(2 * globalId.xy) + x0y1] = float3(localY[2], localU, localV) * normFactor;
     outputTexture[(2 * globalId.xy) + x1y1] = float3(localY[3], localU, localV) * normFactor;
 #else
-    outputTexture[(2 * globalId.xy) + x0y0] = float3(y[2 * localId.y + 0][2 * localId.x + 0], u[localId.y][localId.x], v[localId.y][localId.x]) * normFactor;
-    outputTexture[(2 * globalId.xy) + x1y0] = float3(y[2 * localId.y + 0][2 * localId.x + 1], u[localId.y][localId.x], v[localId.y][localId.x]) * normFactor;
-    outputTexture[(2 * globalId.xy) + x0y1] = float3(y[2 * localId.y + 1][2 * localId.x + 0], u[localId.y][localId.x], v[localId.y][localId.x]) * normFactor;
-    outputTexture[(2 * globalId.xy) + x1y1] = float3(y[2 * localId.y + 1][2 * localId.x + 1], u[localId.y][localId.x], v[localId.y][localId.x]) * normFactor;
+    const float cy0x0 = y[2 * localId.y + 0][2 * localId.x + 0];
+    const float cy0x1 = y[2 * localId.y + 0][2 * localId.x + 1];
+    const float cy1x0 = y[2 * localId.y + 1][2 * localId.x + 0];
+    const float cy1x1 = y[2 * localId.y + 1][2 * localId.x + 1];
+
+    outputTexture[(2 * globalId.xy) + x0y0] = float3(cy0x0, cy0x0, cy0x0);
+    outputTexture[(2 * globalId.xy) + x1y0] = float3(cy0x1, cy0x1, cy0x1);
+    outputTexture[(2 * globalId.xy) + x0y1] = float3(cy1x0, cy1x0, cy1x0);
+    outputTexture[(2 * globalId.xy) + x1y1] = float3(cy1x1, cy1x1, cy1x1);
 #endif
 }
