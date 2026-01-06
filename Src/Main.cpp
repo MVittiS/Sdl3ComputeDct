@@ -20,6 +20,7 @@ struct ConstantBufferData {
     Uint32 frameWidth;
     Uint32 frameHeight;
     Uint32 rowWordStride;
+    Uint32 uvByteOffset;
     Uint32 quantMat[8][8];
 };
 
@@ -114,6 +115,7 @@ int main(int argc, char** args) {
     cbufData.frameWidth = webcamFormat.width;
     cbufData.frameHeight = webcamFormat.height;
     cbufData.rowWordStride = webcamFormat.width / 4;
+    cbufData.uvByteOffset = webcamFormat.width * webcamFormat.height;
 
     // Now, create window, swapchain texture, and pipelines.
     SDL_Window* window = SDL_CreateWindow("FriedCamera", 1280, 720, /*SDL_WINDOW_HIGH_PIXEL_DENSITY*/ 0);
@@ -247,29 +249,6 @@ int main(int argc, char** args) {
         graphicsPipelineInfo.vertex_input_state.num_vertex_attributes = 0;
 
         graphicsPipelineInfo.vertex_input_state.vertex_buffer_descriptions = nullptr;
-
-#if 0
-        static constexpr auto vertexAttributes = [&] {
-            std::array<SDL_GPUVertexAttribute, 3> attributes{};
-            attributes[0].buffer_slot = 0;
-            attributes[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
-            attributes[0].location = 0;
-            attributes[0].offset = 0;
-            
-            attributes[1].buffer_slot = 0;
-            attributes[1].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
-            attributes[1].location = 1;
-            attributes[1].offset = sizeof(float) * 3;
-            
-            attributes[2].buffer_slot = 0;
-            attributes[2].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
-            attributes[2].location = 2;
-            attributes[2].offset = sizeof(float) * 6;
-
-            return attributes;
-        }();
-        graphicsPipelineInfo.vertex_input_state.vertex_attributes = vertexAttributes.data();
-#endif
         graphicsPipelineInfo.vertex_input_state.vertex_attributes = nullptr;
 
         return graphicsPipelineInfo;
@@ -378,6 +357,7 @@ int main(int argc, char** args) {
         SDL_GPUTextureCreateInfo texCreateInfo;
         texCreateInfo.type = SDL_GPU_TEXTURETYPE_2D;
         texCreateInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+//        texCreateInfo.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
         texCreateInfo.width = webcamFormat.width;
         texCreateInfo.height = webcamFormat.height;
         texCreateInfo.layer_count_or_depth = 1;
@@ -430,6 +410,12 @@ int main(int argc, char** args) {
     }
     
 #if 0 // Debug: capture images in advance so that we can close the camera when not in use.
+    FILE* cameraOut = fopen("camera.raw", "wb");
+    if (!cameraOut) {
+        spdlog::error("Could not open 'camera.raw' file.");
+        exit(-1);
+    }
+    std::vector<std::byte> cameraMem(webcamYuvFrameSizeBytes);
     for (int frame = 0; frame < 100; ++frame) {
         Uint64 frameTimestamp;
         SDL_Surface* cpuCameraSurface = SDL_AcquireCameraFrame(webcam, &frameTimestamp);
@@ -441,9 +427,16 @@ int main(int argc, char** args) {
         {
             auto* txPointer = static_cast<Uint8*>(SDL_MapGPUTransferBuffer(gpu, txBuffer, false));
             std::copy_n(static_cast<const Uint8*>(cpuCameraSurface->pixels), webcamYuvFrameSizeBytes, txPointer);
+            std::copy_n(static_cast<const std::byte*>(cpuCameraSurface->pixels), webcamYuvFrameSizeBytes, cameraMem.begin());
             SDL_UnmapGPUTransferBuffer(gpu, txBuffer);
+
         }
         SDL_ReleaseCameraFrame(webcam, cpuCameraSurface);
+    }
+    if (cameraOut) {
+        fwrite(cameraMem.data(), 1, cameraMem.size(), cameraOut);
+        fclose(cameraOut);
+        cameraOut = nullptr;
     }
     SDL_CloseCamera(webcam);
 #endif
@@ -469,7 +462,7 @@ int main(int argc, char** args) {
             frameFence = nullptr;
         }
 #if 1
-        Uint64 frameTimestamp;
+        [[maybe_unused]] Uint64 frameTimestamp;
         SDL_Surface* cpuCameraSurface = SDL_AcquireCameraFrame(webcam, &frameTimestamp);
         if (cpuCameraSurface == nullptr) {
             SDL_Delay(5);

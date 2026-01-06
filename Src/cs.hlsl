@@ -2,6 +2,8 @@ struct ProcessingParams {
     uint frameWidth;
     uint frameHeight;
     uint rowWordStride;
+    uint uvByteOffset;
+    // To-add:
     uint quantMatrix[8][8];
 };
 
@@ -20,6 +22,16 @@ groupshared float dctV[8][8];
 float QuantizeFloat(float x, uint quantFactor) {
     const float quantX = round(x / (float)quantFactor);
     return (quantX * quantFactor);
+}
+
+int4 Uint32ToUVInt(uint x) {
+    int4 bytes;
+    bytes[0] = int((x >>  0) & 0xFF) - 0x80;
+    bytes[1] = int((x >>  8) & 0xFF) - 0x80;
+    bytes[2] = int((x >> 16) & 0xFF) - 0x80;
+    bytes[3] = int((x >> 24) & 0xFF) - 0x80;
+
+    return bytes;
 }
 
 [numthreads(8, 8, 1)]
@@ -45,14 +57,6 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
     const uint2 x1y0 = uint2(1, 0);
     const uint2 x0y1 = uint2(0, 1);
     const uint2 x1y1 = uint2(1, 1);
-
-    // According to https://stackoverflow.com/a/20438735,
-    // HLSL matrices are column-major. I hope this works.
-    const float3x3 yuvMat = {
-        0.299, 0.587, 0.114,
-        -0.14713, -0.28886, 0.436,
-        0.615, -0.515, -0.1
-    };
 
     // Stage 1 - loading shared memory with 4Y, 1U, and 1V tiles
     // DEBUG: load only Y values. Each thread loads 4 values, so first 4 threads read entire 16-element row,
@@ -84,13 +88,29 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
     y[localRowToStore][localColToStore + 2] = ((yValues >> 16) & 0xFF) * (1.0f / 255.0f);
     y[localRowToStore][localColToStore + 3] = ((yValues >> 24) & 0xFF) * (1.0f / 255.0f);
 
-#if 0
-    u[localId.y][localId.x] = (inputRawYuvFrame.Load(linearUVIndex) >> 0) & 0xFFu;
-    v[localId.y][localId.x] = (inputRawYuvFrame.Load(linearUVIndex) >> 8) & 0xFFu;
-#else
-    u[localId.y][localId.x] = 0;
-    v[localId.y][localId.x] = 0;
-#endif
+    // For UV components, we only use half the threads.
+    if (localId.x < 4) {
+        /* Should load:
+        /        0    1    2    3    4    5    6    7    8    9   ...   959
+        /   0    0    4    8   12    -    -    -    -   16   20
+        /   1 1920 1924 ...
+        /   2
+        /   3
+        /   4
+        /   5
+        /   6
+        /   7
+        */
+
+        const uint uvByteCol = (blockId.x * 16) + (localId.x * 4);
+        const uint uvByteRow = globalId.y * (params.rowWordStride * 4);
+        const int4 uvSamples = Uint32ToUVInt(inputRawYuvFrame.Load(params.uvByteOffset + uvByteCol + uvByteRow));
+
+        u[localId.y][2 * localId.x + 0] = uvSamples[0] * (1.0f / 128.0f);
+        v[localId.y][2 * localId.x + 0] = uvSamples[1] * (1.0f / 128.0f);
+        u[localId.y][2 * localId.x + 1] = uvSamples[2] * (1.0f / 128.0f);
+        v[localId.y][2 * localId.x + 1] = uvSamples[3] * (1.0f / 128.0f);
+    }
 
     GroupMemoryBarrierWithGroupSync();
 
@@ -164,14 +184,31 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
     outputTexture[(2 * globalId.xy) + x0y1] = float3(localY[2], localU, localV) * normFactor;
     outputTexture[(2 * globalId.xy) + x1y1] = float3(localY[3], localU, localV) * normFactor;
 #else
-    const float cy0x0 = y[2 * localId.y + 0][2 * localId.x + 0];
-    const float cy0x1 = y[2 * localId.y + 0][2 * localId.x + 1];
-    const float cy1x0 = y[2 * localId.y + 1][2 * localId.x + 0];
-    const float cy1x1 = y[2 * localId.y + 1][2 * localId.x + 1];
+    // From https://paulbourke.net/dataformats/nv12/
+//    r = y + 1.402 * v;
+//    g = y - 0.34414 * u - 0.71414 * v;
+//    b = y + 1.772 * u;
+    
+    // Elements are stored col by col, then row after row.
+    // Just like what you'd expect visually, huh.
+    const float3x3 yuvToRgb = float3x3 (
+        1.0,    0.0,      1.402,
+        1.0,   -0.34414, -0.71414,
+        1.0,    1.772,    0.0
+    );
 
-    outputTexture[(2 * globalId.xy) + x0y0] = float3(cy0x0, cy0x0, cy0x0);
-    outputTexture[(2 * globalId.xy) + x1y0] = float3(cy0x1, cy0x1, cy0x1);
-    outputTexture[(2 * globalId.xy) + x0y1] = float3(cy1x0, cy1x0, cy1x0);
-    outputTexture[(2 * globalId.xy) + x1y1] = float3(cy1x1, cy1x1, cy1x1);
+    const float3 zeros = float3(0, 0, 0);
+    const float3 ones = float3(1, 1, 1);
+
+    const float3 cy0x0 = float3(y[2 * localId.y + 0][2 * localId.x + 0], u[localId.y][localId.x], v[localId.y][localId.x]);
+    const float3 cy0x1 = float3(y[2 * localId.y + 0][2 * localId.x + 1], u[localId.y][localId.x], v[localId.y][localId.x]);
+    const float3 cy1x0 = float3(y[2 * localId.y + 1][2 * localId.x + 0], u[localId.y][localId.x], v[localId.y][localId.x]);
+    const float3 cy1x1 = float3(y[2 * localId.y + 1][2 * localId.x + 1], u[localId.y][localId.x], v[localId.y][localId.x]);
+
+    outputTexture[(2 * globalId.xy) + x0y0] = clamp(mul(yuvToRgb, cy0x0), zeros, ones);
+    outputTexture[(2 * globalId.xy) + x1y0] = clamp(mul(yuvToRgb, cy0x1), zeros, ones);
+    outputTexture[(2 * globalId.xy) + x0y1] = clamp(mul(yuvToRgb, cy1x0), zeros, ones);
+    outputTexture[(2 * globalId.xy) + x1y1] = clamp(mul(yuvToRgb, cy1x1), zeros, ones);
+    
 #endif
 }
