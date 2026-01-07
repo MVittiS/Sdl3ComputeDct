@@ -1,4 +1,7 @@
-// #include <SDL3/SDL.h>
+#include <imgui.h>
+#include <imgui_impl_sdl3.h>
+#include <imgui_impl_sdlgpu3.h>
+
 #include <SDL3/SDL_camera.h>
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_events.h>
@@ -21,8 +24,11 @@ struct ConstantBufferData {
     Uint32 frameHeight;
     Uint32 rowWordStride;
     Uint32 uvByteOffset;
-    Uint32 quantMat[8][8];
+    Uint32 padding[60];
+    float quantTable[8][8];
+    float quantTableInv[8][8];
 };
+static_assert((sizeof(ConstantBufferData) % 256 == 0), "ConstantBufferData needs to be sized a multiple of 256 bytes. D3D requires that.");
 
 int main(int argc, char** args) {
     const bool debugMode = true;
@@ -109,7 +115,8 @@ int main(int argc, char** args) {
     ConstantBufferData cbufData;
     for (int row = 0; row < 8; ++row) {
         for (int col = 0; col < 8; ++col) {
-            cbufData.quantMat[row][col] = 1;
+            cbufData.quantTable[row][col] = 1;
+            cbufData.quantTableInv[row][col] = 1;
         }
     }
     cbufData.frameWidth = webcamFormat.width;
@@ -121,6 +128,22 @@ int main(int argc, char** args) {
     SDL_Window* window = SDL_CreateWindow("FriedCamera", 1280, 720, /*SDL_WINDOW_HIGH_PIXEL_DENSITY*/ 0);
     SDL_ClaimWindowForGPUDevice(gpu, window);
     SDL_SetGPUSwapchainParameters(gpu, window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, SDL_GPU_PRESENTMODE_VSYNC);
+
+
+    // Setup Dear ImGui context - most of the code is straight from https://github.com/ocornut/imgui/pull/8163/files#diff-3ef28c917731f41f2381f195496078a9eb430fe357c9ef11cfb9226024282777
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
+
+    // Setup Platform/Renderer backends
+    ImGui_ImplSDL3_InitForOther(window);
+    ImGui_ImplSDLGPU3_InitInfo init_info = {};
+    init_info.Device = gpu;
+    init_info.ColorTargetFormat = SDL_GetGPUSwapchainTextureFormat(gpu, window);
+    init_info.MSAASamples = SDL_GPU_SAMPLECOUNT_1;
+    ImGui_ImplSDLGPU3_Init(&init_info);
 
     const auto shaderFormats = SDL_GetGPUShaderFormats(gpu);
 #if defined(__APPLE__)
@@ -409,7 +432,7 @@ int main(int argc, char** args) {
         exit(-1);
     }
     
-#if 0 // Debug: capture images in advance so that we can close the camera when not in use.
+#if 1 // Debug: capture images in advance so that we can close the camera when not in use.
     FILE* cameraOut = fopen("camera.raw", "wb");
     if (!cameraOut) {
         spdlog::error("Could not open 'camera.raw' file.");
@@ -447,6 +470,7 @@ int main(int argc, char** args) {
     while (!shouldExit) {
         SDL_Event events;
         while(SDL_PollEvent(&events)) {
+            ImGui_ImplSDL3_ProcessEvent(&events);
             switch (events.type) {
                 case SDL_EVENT_QUIT:
                     shouldExit = true;
@@ -461,7 +485,7 @@ int main(int argc, char** args) {
             SDL_ReleaseGPUFence(gpu, frameFence);
             frameFence = nullptr;
         }
-#if 1
+#if 0
         [[maybe_unused]] Uint64 frameTimestamp;
         SDL_Surface* cpuCameraSurface = SDL_AcquireCameraFrame(webcam, &frameTimestamp);
         if (cpuCameraSurface == nullptr) {
@@ -476,7 +500,18 @@ int main(int argc, char** args) {
         }
         SDL_ReleaseCameraFrame(webcam, cpuCameraSurface);
 #endif
-        
+        // Start the Dear ImGui frame
+        ImGui_ImplSDLGPU3_NewFrame();
+        ImGui_ImplSDL3_NewFrame();
+        ImGui::NewFrame();
+
+        static bool showDemoWindow = true;
+        ImGui::ShowDemoWindow(&showDemoWindow);
+
+        ImGui::Render();
+        ImDrawData* imGuiDrawData = ImGui::GetDrawData();
+
+        // Acquire swapchain
         SDL_GPUTexture* swapchainTexture;
         Uint32 swapchainWidth, swapchainHeight;
         SDL_GPUCommandBuffer* frameCmdBuf = SDL_AcquireGPUCommandBuffer(gpu); {
@@ -534,6 +569,8 @@ int main(int argc, char** args) {
 
                 return samplerBinding;
             }();
+            
+            Imgui_ImplSDLGPU3_PrepareDrawData(imGuiDrawData, frameCmdBuf);
 
             SDL_GPURenderPass* gfxPass = SDL_BeginGPURenderPass(frameCmdBuf, &rtInfo, numColorTargets, dsInfo); {
                 SDL_BindGPUGraphicsPipeline(gfxPass, gfxPipe);
@@ -547,6 +584,9 @@ int main(int argc, char** args) {
                 static constexpr Uint32 firstVert = 0;
                 static constexpr Uint32 firstInstance = 0;
                 SDL_DrawGPUPrimitives(gfxPass, numVerts, numInstances, firstVert, firstInstance);
+
+                // Finally, render ImGui.
+                ImGui_ImplSDLGPU3_RenderDrawData(imGuiDrawData, frameCmdBuf, gfxPass);
             } SDL_EndGPURenderPass(gfxPass);
         } frameFence = SDL_SubmitGPUCommandBufferAndAcquireFence(frameCmdBuf);
     }

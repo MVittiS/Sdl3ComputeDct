@@ -3,8 +3,13 @@ struct ProcessingParams {
     uint frameHeight;
     uint rowWordStride;
     uint uvByteOffset;
-    // To-add:
-    uint quantMatrix[8][8];
+
+    // Needs padding due to D3D's annoying constant buffer alignment rules.
+    // Without this, the last few elements of the struct are dropped.
+    uint padding[60];
+
+    float quantTable[8][8];
+    float quantTableInv[8][8];
 };
 
 ByteAddressBuffer inputRawYuvFrame      : register(t0, space0);
@@ -19,8 +24,8 @@ groupshared float dctY[16][16];
 groupshared float dctU[8][8];
 groupshared float dctV[8][8];
 
-float QuantizeFloat(float x, uint quantFactor) {
-    const float quantX = round(x / (float)quantFactor);
+float QuantizeFloat(float x, float quantFactor, float invQuantFactor) {
+    const float quantX = round(x * invQuantFactor);
     return (quantX * quantFactor);
 }
 
@@ -141,12 +146,12 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
     }
 
     const uint quantMatOffset = dot(localId.xy, uint2(1, 8));
-    localDctY[0] = QuantizeFloat(localDctY[0], params.quantMatrix[localId.y][localId.x]);
-    localDctY[1] = QuantizeFloat(localDctY[1], params.quantMatrix[localId.y][localId.x]);
-    localDctY[2] = QuantizeFloat(localDctY[2], params.quantMatrix[localId.y][localId.x]);
-    localDctY[3] = QuantizeFloat(localDctY[3], params.quantMatrix[localId.y][localId.x]);
-    localDctU = QuantizeFloat(localDctU, params.quantMatrix[localId.y][localId.x]);
-    localDctV = QuantizeFloat(localDctV, params.quantMatrix[localId.y][localId.x]);
+    localDctY[0] = QuantizeFloat(localDctY[0], params.quantTable[localId.y][localId.x], params.quantTableInv[localId.y][localId.x]);
+    localDctY[1] = QuantizeFloat(localDctY[1], params.quantTable[localId.y][localId.x], params.quantTableInv[localId.y][localId.x]);
+    localDctY[2] = QuantizeFloat(localDctY[2], params.quantTable[localId.y][localId.x], params.quantTableInv[localId.y][localId.x]);
+    localDctY[3] = QuantizeFloat(localDctY[3], params.quantTable[localId.y][localId.x], params.quantTableInv[localId.y][localId.x]);
+    localDctU = QuantizeFloat(localDctU, params.quantTable[localId.y][localId.x], params.quantTableInv[localId.y][localId.x]);
+    localDctV = QuantizeFloat(localDctV, params.quantTable[localId.y][localId.x], params.quantTableInv[localId.y][localId.x]);
 
     dctY[2 * localId.y + 0][2 * localId.x + 0] = localDctY[0];
     dctY[2 * localId.y + 0][2 * localId.x + 1] = localDctY[1];

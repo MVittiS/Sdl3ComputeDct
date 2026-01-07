@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 project(Sdl3ComputeDct)
 set(CMAKE_EXPORT_COMPILE_COMMANDS true)
 
+find_package(imgui CONFIG REQUIRED)
 find_package(SDL3 REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 
@@ -254,6 +255,7 @@ target_compile_options(ComputeDct
 )
 target_link_libraries(ComputeDct
     PRIVATE
+        imgui::imgui
         SDL3::SDL3
         spdlog::spdlog
 )
