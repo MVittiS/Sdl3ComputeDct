@@ -239,7 +239,7 @@ int main(int argc, char** args) {
             SDL_GPUDepthStencilState dsState{};
             dsState.enable_depth_test = false;
             dsState.enable_depth_write = false;
-            dsState.compare_op = SDL_GPU_COMPAREOP_ALWAYS;
+            dsState.compare_op = SDL_GPU_COMPAREOP_NEVER;
             return dsState;
         }();
         graphicsPipelineInfo.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLESTRIP;
@@ -403,7 +403,7 @@ int main(int argc, char** args) {
         samplerInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_MIRRORED_REPEAT;
         samplerInfo.mip_lod_bias = .0f;
         samplerInfo.max_anisotropy = 8.f;
-        samplerInfo.compare_op = SDL_GPU_COMPAREOP_ALWAYS;
+        samplerInfo.compare_op = SDL_GPU_COMPAREOP_INVALID;
         samplerInfo.min_lod = .0f;
         samplerInfo.max_lod = .0f;
         samplerInfo.enable_anisotropy = true;
