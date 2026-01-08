@@ -113,15 +113,19 @@ int main(int argc, char** args) {
     // Frame is 1 plane of Y in full res, and one interleaved U+V plane in half-res (width * helf-height)
     const Uint32 webcamYuvFrameSizeBytes = (3 * webcamFormat.width * webcamFormat.height) / 2;
     ConstantBufferData cbufData;
+    for (int idx = 0; idx < 60; ++idx) {
+        cbufData.padding[idx] = idx;
+    }
     for (int row = 0; row < 8; ++row) {
         for (int col = 0; col < 8; ++col) {
-            cbufData.quantTable[row][col] = 1;
-            cbufData.quantTableInv[row][col] = 1;
+            const float quantVal = float((2 * row + 1) * (2 * col + 1)) / 255.0f;
+            cbufData.quantTable[row][col] = quantVal;
+            cbufData.quantTableInv[row][col] = 1.0f / quantVal;
         }
     }
     cbufData.frameWidth = webcamFormat.width;
     cbufData.frameHeight = webcamFormat.height;
-    cbufData.rowWordStride = webcamFormat.width / 4;
+    cbufData.rowByteStride = webcamFormat.width;
     cbufData.uvByteOffset = webcamFormat.width * webcamFormat.height;
 
     // Now, create window, swapchain texture, and pipelines.
@@ -286,41 +290,6 @@ int main(int argc, char** args) {
     else {
         spdlog::info("Graphics pipeline created.");
     }
-
-
-    // Then, create Windows to display textures.
-    
-#if 0
-    const auto gpuProps = SDL_GetGPUDeviceProperties(gpu);
-    printf("GPU Properties:\n");
-    auto propCallback = [](void *userdata, SDL_PropertiesID props, const char *name) {
-        printf("  - %s | ", name);
-        SDL_PropertyType prop_type = SDL_GetPropertyType(props, name);
-        
-        switch (prop_type) {
-            case SDL_PROPERTY_TYPE_POINTER:
-                printf("Pointer: %p\n", SDL_GetPointerProperty(props, name, nullptr));
-                break;
-            case SDL_PROPERTY_TYPE_STRING:
-                printf("String: %s\n", SDL_GetStringProperty(props, name, ""));
-                break;
-            case SDL_PROPERTY_TYPE_NUMBER:
-                printf("Number: %zu\n", (size_t)SDL_GetNumberProperty(props, name, 0));
-                break;
-            case SDL_PROPERTY_TYPE_FLOAT:
-                printf("Float: %f\n", SDL_GetFloatProperty(props, name, 0.0f));
-                break;
-            case SDL_PROPERTY_TYPE_BOOLEAN:
-                printf("Bool: %s\n", SDL_GetBooleanProperty(props, name, false) ? "Y" : "N");
-                break;
-            case SDL_PROPERTY_TYPE_INVALID:
-            default:
-                printf("INVALID\n");
-                break;
-        }
-    };
-    SDL_EnumerateProperties(gpuProps, propCallback, nullptr);
-#endif
 
     SDL_GPUComputePipeline* computePipe = [&] {
         size_t shaderSize;

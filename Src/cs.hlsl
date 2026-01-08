@@ -6,10 +6,12 @@ struct ProcessingParams {
 
     // Needs padding due to D3D's annoying constant buffer alignment rules.
     // Without this, the last few elements of the struct are dropped.
-    uint padding[60];
-
-    float quantTable[8][8];
-    float quantTableInv[8][8];
+    uint4 padding[15];
+    
+    // D3D is also annoying with float packing; you need to use float4
+    //  for constant buffers. Ugh...
+    float4 quantTable[8][2];
+    float4 quantTableInv[8][2];
 };
 
 ByteAddressBuffer inputRawYuvFrame      : register(t0, space0);
@@ -47,15 +49,16 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
     const float invSqrt8 = 1.0f/sqrt(8.0f);
     const float invSqrt4 = 0.5;
 
-    const float halfDctCoeffs[8][8] = {
+    const double pi = 3.14159265359;
+    const float dctCoeffs[8][8] = {
         {invSqrt8, invSqrt8, invSqrt8, invSqrt8, invSqrt8, invSqrt8, invSqrt8, invSqrt8},
-        {1./invSqrt4, 0.92388/invSqrt4, 0.707107/invSqrt4, 0.382683/invSqrt4, 0./invSqrt4, -0.382683/invSqrt4, -0.707107/invSqrt4, -0.92388/invSqrt4},
-        {1./invSqrt4, 0.707107/invSqrt4, 0./invSqrt4, -0.707107/invSqrt4, -1./invSqrt4, -0.707107/invSqrt4, 0./invSqrt4, 0.707107/invSqrt4},
-        {1./invSqrt4, 0.382683/invSqrt4, -0.707107/invSqrt4, -0.92388/invSqrt4, 0./invSqrt4, 0.92388/invSqrt4, 0.707107/invSqrt4, -0.382683/invSqrt4},
-        {1./invSqrt4, 0./invSqrt4, -1./invSqrt4, 0./invSqrt4, 1./invSqrt4, 0./invSqrt4, -1./invSqrt4, 0./invSqrt4},
-        {1./invSqrt4, -0.382683/invSqrt4, -0.707107/invSqrt4, 0.92388/invSqrt4, 0./invSqrt4, -0.92388/invSqrt4, 0.707107/invSqrt4, 0.382683/invSqrt4},
-        {1./invSqrt4, -0.707107/invSqrt4, 0./invSqrt4, 0.707107/invSqrt4, -1./invSqrt4, 0.707107/invSqrt4, 0./invSqrt4, -0.707107/invSqrt4},
-        {1./invSqrt4, -0.92388/invSqrt4, 0.707107/invSqrt4, -0.382683/invSqrt4, 0./invSqrt4, 0.382683/invSqrt4, -0.707107/invSqrt4, 0.92388/invSqrt4}
+        {invSqrt4*cos(1 * 1 * pi / 16.0), invSqrt4*cos(1 * 3 * pi / 16.0), invSqrt4*cos(1 * 5 * pi / 16.0), invSqrt4*cos(1 * 7 * pi / 16.0), invSqrt4*cos(1 * 9 * pi / 16.0), invSqrt4*cos(1 * 11 * pi / 16.0), invSqrt4*cos(1 * 13 * pi / 16.0), invSqrt4*cos(1 * 15 * pi / 16.0)},
+        {invSqrt4*cos(2 * 1 * pi / 16.0), invSqrt4*cos(2 * 3 * pi / 16.0), invSqrt4*cos(2 * 5 * pi / 16.0), invSqrt4*cos(2 * 7 * pi / 16.0), invSqrt4*cos(2 * 9 * pi / 16.0), invSqrt4*cos(2 * 11 * pi / 16.0), invSqrt4*cos(2 * 13 * pi / 16.0), invSqrt4*cos(2 * 15 * pi / 16.0)},
+        {invSqrt4*cos(3 * 1 * pi / 16.0), invSqrt4*cos(3 * 3 * pi / 16.0), invSqrt4*cos(3 * 5 * pi / 16.0), invSqrt4*cos(3 * 7 * pi / 16.0), invSqrt4*cos(3 * 9 * pi / 16.0), invSqrt4*cos(3 * 11 * pi / 16.0), invSqrt4*cos(3 * 13 * pi / 16.0), invSqrt4*cos(3 * 15 * pi / 16.0)},
+        {invSqrt4*cos(4 * 1 * pi / 16.0), invSqrt4*cos(4 * 3 * pi / 16.0), invSqrt4*cos(4 * 5 * pi / 16.0), invSqrt4*cos(4 * 7 * pi / 16.0), invSqrt4*cos(4 * 9 * pi / 16.0), invSqrt4*cos(4 * 11 * pi / 16.0), invSqrt4*cos(4 * 13 * pi / 16.0), invSqrt4*cos(4 * 15 * pi / 16.0)},
+        {invSqrt4*cos(5 * 1 * pi / 16.0), invSqrt4*cos(5 * 3 * pi / 16.0), invSqrt4*cos(5 * 5 * pi / 16.0), invSqrt4*cos(5 * 7 * pi / 16.0), invSqrt4*cos(5 * 9 * pi / 16.0), invSqrt4*cos(5 * 11 * pi / 16.0), invSqrt4*cos(5 * 13 * pi / 16.0), invSqrt4*cos(5 * 15 * pi / 16.0)},
+        {invSqrt4*cos(6 * 1 * pi / 16.0), invSqrt4*cos(6 * 3 * pi / 16.0), invSqrt4*cos(6 * 5 * pi / 16.0), invSqrt4*cos(6 * 7 * pi / 16.0), invSqrt4*cos(6 * 9 * pi / 16.0), invSqrt4*cos(6 * 11 * pi / 16.0), invSqrt4*cos(6 * 13 * pi / 16.0), invSqrt4*cos(6 * 15 * pi / 16.0)},
+        {invSqrt4*cos(7 * 1 * pi / 16.0), invSqrt4*cos(7 * 3 * pi / 16.0), invSqrt4*cos(7 * 5 * pi / 16.0), invSqrt4*cos(7 * 7 * pi / 16.0), invSqrt4*cos(7 * 9 * pi / 16.0), invSqrt4*cos(7 * 11 * pi / 16.0), invSqrt4*cos(7 * 13 * pi / 16.0), invSqrt4*cos(7 * 15 * pi / 16.0)},
     };
 
     const uint2 x0y0 = uint2(0, 0);
@@ -64,19 +67,10 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
     const uint2 x1y1 = uint2(1, 1);
 
     // Stage 1 - loading shared memory with 4Y, 1U, and 1V tiles
-    // DEBUG: load only Y values. Each thread loads 4 values, so first 4 threads read entire 16-element row,
-    //  with 16 rows being read each by 4 threads. These values are all put in shared memory.
-    
     /* For 1920x1080, we should load:
     /        0    1    2    3    4    5    6    7
     /   0    0    4    8   12 1920 1924 1928 1932
     /   1 3840 3844 ...
-    /   2
-    /   3
-    /   4
-    /   5
-    /   6
-    /   7
     */
     const bool isOddRow = (localId.x >= 4);
     const uint rowOffset = ((localId.x % 4) * 4)
@@ -101,12 +95,6 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
         /        0    1    2    3    4    5    6    7    8    9   ...   959
         /   0    0    4    8   12    -    -    -    -   16   20
         /   1 1920 1924 ...
-        /   2
-        /   3
-        /   4
-        /   5
-        /   6
-        /   7
         */
 
         const uint uvByteCol = (blockId.x * 16) + (localId.x * 4);
@@ -123,10 +111,10 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
 
     // Stage 2 - DCT and destructive quantization
 
-    dctY[2 * localId.y + 0][2 * localId.x + 0] = .0f;
-    dctY[2 * localId.y + 0][2 * localId.x + 1] = .0f;
-    dctY[2 * localId.y + 1][2 * localId.x + 0] = .0f;
-    dctY[2 * localId.y + 1][2 * localId.x + 1] = .0f;
+    dctY[localId.y + 0][localId.x + 0] = .0f;
+    dctY[localId.y + 0][localId.x + 8] = .0f;
+    dctY[localId.y + 8][localId.x + 0] = .0f;
+    dctY[localId.y + 8][localId.x + 8] = .0f;
 
     dctU[localId.y][localId.x] = .0f;
     dctV[localId.y][localId.x] = .0f;
@@ -136,8 +124,9 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
     float localDctV = .0f;
 
     for (int row = 0; row != 8; ++row) {
+        const float rowCoeff = dctCoeffs[localId.y][row];
         for (int col = 0; col != 8; ++col) {
-            const float coeff = halfDctCoeffs[localId.y][row] * halfDctCoeffs[localId.x][col];
+            const float coeff = rowCoeff * dctCoeffs[localId.x][col];
             localDctY[0] += y[row + 0][col + 0] * coeff;
             localDctY[1] += y[row + 0][col + 8] * coeff;
             localDctY[2] += y[row + 8][col + 0] * coeff;
@@ -147,18 +136,19 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
         }
     }
 
-    const uint quantMatOffset = dot(localId.xy, uint2(1, 8));
-    localDctY[0] = QuantizeFloat(localDctY[0], params.quantTable[localId.y][localId.x], params.quantTableInv[localId.y][localId.x]);
-    localDctY[1] = QuantizeFloat(localDctY[1], params.quantTable[localId.y][localId.x], params.quantTableInv[localId.y][localId.x]);
-    localDctY[2] = QuantizeFloat(localDctY[2], params.quantTable[localId.y][localId.x], params.quantTableInv[localId.y][localId.x]);
-    localDctY[3] = QuantizeFloat(localDctY[3], params.quantTable[localId.y][localId.x], params.quantTableInv[localId.y][localId.x]);
-    localDctU = QuantizeFloat(localDctU, params.quantTable[localId.y][localId.x], params.quantTableInv[localId.y][localId.x]);
-    localDctV = QuantizeFloat(localDctV, params.quantTable[localId.y][localId.x], params.quantTableInv[localId.y][localId.x]);
+    const float localQuant    = params.quantTable   [localId.y][localId.x / 4][localId.x % 4];
+    const float localQuantInv = params.quantTableInv[localId.y][localId.x / 4][localId.x % 4];
+    localDctY[0] = QuantizeFloat(localDctY[0], localQuant, localQuantInv);
+    localDctY[1] = QuantizeFloat(localDctY[1], localQuant, localQuantInv);
+    localDctY[2] = QuantizeFloat(localDctY[2], localQuant, localQuantInv);
+    localDctY[3] = QuantizeFloat(localDctY[3], localQuant, localQuantInv);
+    localDctU = QuantizeFloat(localDctU, localQuant, localQuantInv);
+    localDctV = QuantizeFloat(localDctV, localQuant, localQuantInv);
 
-    dctY[2 * localId.y + 0][2 * localId.x + 0] = localDctY[0];
-    dctY[2 * localId.y + 0][2 * localId.x + 1] = localDctY[1];
-    dctY[2 * localId.y + 1][2 * localId.x + 0] = localDctY[2];
-    dctY[2 * localId.y + 1][2 * localId.x + 1] = localDctY[3];
+    dctY[localId.y + 0][localId.x + 0] = localDctY[0];
+    dctY[localId.y + 0][localId.x + 8] = localDctY[1];
+    dctY[localId.y + 8][localId.x + 0] = localDctY[2];
+    dctY[localId.y + 8][localId.x + 8] = localDctY[3];
 
     dctU[localId.y][localId.x] = localDctU;
     dctV[localId.y][localId.x] = localDctV;
@@ -171,8 +161,9 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
     float localV = .0f;
 
     for (int row = 0; row != 8; ++row) {
+        const float rowCoeff = dctCoeffs[row][localId.y];
         for (int col = 0; col != 8; ++col) {
-            const float coeff = halfDctCoeffs[localId.y][row] * halfDctCoeffs[localId.x][col];
+            const float coeff = rowCoeff * dctCoeffs[col][localId.x];
             localY[0] += dctY[row + 0][col + 0] * coeff;
             localY[1] += dctY[row + 0][col + 8] * coeff;
             localY[2] += dctY[row + 8][col + 0] * coeff;
@@ -181,21 +172,18 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
             localV += dctV[row][col] * coeff;
         }
     }
+    
+    u[localId.y][localId.x] = localU;
+    v[localId.y][localId.x] = localV;
 
-    const float normFactor = 1.0f/255.0f;
+    GroupMemoryBarrierWithGroupSync();
 
     // Now, let each thread write to the texture.
-#if 0
-    outputTexture[(2 * globalId.xy) + x0y0] = float3(localY[0], localU, localV) * normFactor;
-    outputTexture[(2 * globalId.xy) + x1y0] = float3(localY[1], localU, localV) * normFactor;
-    outputTexture[(2 * globalId.xy) + x0y1] = float3(localY[2], localU, localV) * normFactor;
-    outputTexture[(2 * globalId.xy) + x1y1] = float3(localY[3], localU, localV) * normFactor;
-#else
     // From https://paulbourke.net/dataformats/nv12/
-//    r = y + 1.402 * v;
-//    g = y - 0.34414 * u - 0.71414 * v;
-//    b = y + 1.772 * u;
-    
+    //    r = y + 1.402 * v;
+    //    g = y - 0.34414 * u - 0.71414 * v;
+    //    b = y + 1.772 * u;
+
     // Elements are stored col by col, then row after row.
     // Just like what you'd expect visually, huh.
     const float3x3 yuvToRgb = float3x3 (
@@ -207,15 +195,13 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
     const float3 zeros = float3(0, 0, 0);
     const float3 ones = float3(1, 1, 1);
 
-    const float3 cy0x0 = float3(y[2 * localId.y + 0][2 * localId.x + 0], u[localId.y][localId.x], v[localId.y][localId.x]);
-    const float3 cy0x1 = float3(y[2 * localId.y + 0][2 * localId.x + 1], u[localId.y][localId.x], v[localId.y][localId.x]);
-    const float3 cy1x0 = float3(y[2 * localId.y + 1][2 * localId.x + 0], u[localId.y][localId.x], v[localId.y][localId.x]);
-    const float3 cy1x1 = float3(y[2 * localId.y + 1][2 * localId.x + 1], u[localId.y][localId.x], v[localId.y][localId.x]);
+    const float3 cy0x0 = float3(localY[0], u[(0 + localId.y) / 2][(0 + localId.x) / 2], v[(0 + localId.y) / 2][(0 + localId.x) / 2]);
+    const float3 cy0x1 = float3(localY[1], u[(0 + localId.y) / 2][(8 + localId.x) / 2], v[(0 + localId.y) / 2][(8 + localId.x) / 2]);
+    const float3 cy1x0 = float3(localY[2], u[(8 + localId.y) / 2][(0 + localId.x) / 2], v[(8 + localId.y) / 2][(0 + localId.x) / 2]);
+    const float3 cy1x1 = float3(localY[3], u[(8 + localId.y) / 2][(8 + localId.x) / 2], v[(8 + localId.y) / 2][(8 + localId.x) / 2]);
 
-    outputTexture[(2 * globalId.xy) + x0y0] = clamp(mul(yuvToRgb, cy0x0), zeros, ones);
-    outputTexture[(2 * globalId.xy) + x1y0] = clamp(mul(yuvToRgb, cy0x1), zeros, ones);
-    outputTexture[(2 * globalId.xy) + x0y1] = clamp(mul(yuvToRgb, cy1x0), zeros, ones);
-    outputTexture[(2 * globalId.xy) + x1y1] = clamp(mul(yuvToRgb, cy1x1), zeros, ones);
-    
-#endif
+    outputTexture[(16 * blockId.xy) + localId.xy + (8 * x0y0)] = clamp(mul(yuvToRgb, cy0x0), zeros, ones);
+    outputTexture[(16 * blockId.xy) + localId.xy + (8 * x1y0)] = clamp(mul(yuvToRgb, cy0x1), zeros, ones);
+    outputTexture[(16 * blockId.xy) + localId.xy + (8 * x0y1)] = clamp(mul(yuvToRgb, cy1x0), zeros, ones);
+    outputTexture[(16 * blockId.xy) + localId.xy + (8 * x1y1)] = clamp(mul(yuvToRgb, cy1x1), zeros, ones);
 }
