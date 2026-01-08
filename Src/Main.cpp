@@ -22,7 +22,7 @@
 struct ConstantBufferData {
     Uint32 frameWidth;
     Uint32 frameHeight;
-    Uint32 rowWordStride;
+    Uint32 rowByteStride;
     Uint32 uvByteOffset;
     Uint32 padding[60];
     float quantTable[8][8];

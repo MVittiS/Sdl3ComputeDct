@@ -1,7 +1,7 @@
 struct ProcessingParams {
     uint frameWidth;
     uint frameHeight;
-    uint rowWordStride;
+    uint rowByteStride;
     uint uvByteOffset;
 
     // Needs padding due to D3D's annoying constant buffer alignment rules.
@@ -67,7 +67,7 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
     // DEBUG: load only Y values. Each thread loads 4 values, so first 4 threads read entire 16-element row,
     //  with 16 rows being read each by 4 threads. These values are all put in shared memory.
     
-    /* Should load:
+    /* For 1920x1080, we should load:
     /        0    1    2    3    4    5    6    7
     /   0    0    4    8   12 1920 1924 1928 1932
     /   1 3840 3844 ...
@@ -79,9 +79,11 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
     /   7
     */
     const bool isOddRow = (localId.x >= 4);
-    const uint rowOffset = ((localId.x % 4) + (isOddRow ? params.rowWordStride : 0)) * 4
-        + (blockId.x * 16);
-    const uint colOffset = globalId.y * params.rowWordStride * 8;
+    const uint rowOffset = ((localId.x % 4) * 4)
+        + (isOddRow ? params.rowByteStride : 0)
+        + (blockId.x * 16)
+    ;
+    const uint colOffset = globalId.y * params.rowByteStride * 2;
     const uint yValues = inputRawYuvFrame.Load(rowOffset + colOffset);
 
     const bool isLocalOddRow = (localId.x >= 4);
@@ -95,7 +97,7 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
 
     // For UV components, we only use half the threads.
     if (localId.x < 4) {
-        /* Should load:
+        /* For 1920x1080, we should load:
         /        0    1    2    3    4    5    6    7    8    9   ...   959
         /   0    0    4    8   12    -    -    -    -   16   20
         /   1 1920 1924 ...
@@ -108,7 +110,7 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
         */
 
         const uint uvByteCol = (blockId.x * 16) + (localId.x * 4);
-        const uint uvByteRow = globalId.y * (params.rowWordStride * 4);
+        const uint uvByteRow = globalId.y * params.rowByteStride;
         const int4 uvSamples = Uint32ToUVInt(inputRawYuvFrame.Load(params.uvByteOffset + uvByteCol + uvByteRow));
 
         u[localId.y][2 * localId.x + 0] = uvSamples[0] * (1.0f / 128.0f);
