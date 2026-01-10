@@ -30,6 +30,105 @@ struct ConstantBufferData {
 };
 static_assert((sizeof(ConstantBufferData) % 256 == 0), "ConstantBufferData needs to be sized a multiple of 256 bytes. D3D requires that.");
 
+void ResizeBuffersForCamera(SDL_Camera* pCamera
+    , SDL_GPUDevice *pDevice
+    , SDL_GPUTransferBuffer **ppTxBuffer
+    , SDL_GPUBuffer **ppBuffer
+    , SDL_GPUTexture **ppTexture
+    , ConstantBufferData *pCBufData
+    , bool *pIsNv12Format
+) {
+    SDL_CameraSpec cameraFormat = {};
+    if (!SDL_GetCameraFormat(pCamera, &cameraFormat)) {
+        spdlog::error("Could not get camera format.");
+        exit(1);
+    }
+    else {
+        spdlog::info("Camera spec:\n"
+            "- Format: {:x}\n"
+            "- Colorspace: {:x}\n"
+            "- Width: {}\n"
+            "- Height: {}\n"
+            "- Framerate: {}/{} ({})"
+            , Uint64(cameraFormat.format)
+            , Uint64(cameraFormat.colorspace)
+            , cameraFormat.width
+            , cameraFormat.height
+            , cameraFormat.framerate_numerator
+            , cameraFormat.framerate_denominator
+            , float(cameraFormat.framerate_numerator) / float(cameraFormat.framerate_denominator)
+        );
+    }
+    // Frame is 1 plane of Y in full res, and one interleaved U+V plane in half-res (width * helf-height)
+    const Uint32 webcamYuvFrameSizeBytes = (3 * cameraFormat.width * cameraFormat.height) / 2;
+    
+    pCBufData->frameWidth = cameraFormat.width;
+    pCBufData->frameHeight = cameraFormat.height;
+    pCBufData->rowByteStride = cameraFormat.width;
+    pCBufData->uvByteOffset = cameraFormat.width * cameraFormat.height;
+    
+    if (*ppTxBuffer) {
+        SDL_ReleaseGPUTransferBuffer(pDevice, *ppTxBuffer);
+    }
+    if (*ppBuffer) {
+        SDL_ReleaseGPUBuffer(pDevice, *ppBuffer);
+    }
+    if (*ppTexture) {
+        SDL_ReleaseGPUTexture(pDevice, *ppTexture);
+    }
+    
+    // Create YUV upload buffer
+    *ppTxBuffer = [&] {
+        SDL_GPUTransferBufferCreateInfo txBufferInfo;
+            txBufferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+            txBufferInfo.size = webcamYuvFrameSizeBytes;
+            txBufferInfo.props = 0;
+        return SDL_CreateGPUTransferBuffer(pDevice, &txBufferInfo);
+    }();
+    if (*ppTxBuffer == nullptr) {
+        spdlog::error("Could not create image upload buffer! Error: {}", SDL_GetError());
+        exit(-1);
+    }
+    
+    // Create YUV GPU buffer
+    *ppBuffer = [&] {
+        SDL_GPUBufferCreateInfo gpuCameraFrameBufferInfo;
+        gpuCameraFrameBufferInfo.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
+        gpuCameraFrameBufferInfo.size = webcamYuvFrameSizeBytes;
+        return SDL_CreateGPUBuffer(pDevice, &gpuCameraFrameBufferInfo);
+    }();
+    if (*ppBuffer == nullptr) {
+        spdlog::error("Could not create GPU camera frame. Are we out of VRAM?");
+        exit(-1);
+    }
+    SDL_SetGPUBufferName(pDevice, *ppBuffer, "GPU Camera Frame");
+
+    // Create output texture
+    *ppTexture = [&] {
+        SDL_GPUTextureCreateInfo texCreateInfo;
+        texCreateInfo.type = SDL_GPU_TEXTURETYPE_2D;
+        texCreateInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+//        texCreateInfo.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+        texCreateInfo.width = cameraFormat.width;
+        texCreateInfo.height = cameraFormat.height;
+        texCreateInfo.layer_count_or_depth = 1;
+        texCreateInfo.num_levels = 1;
+        texCreateInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
+        texCreateInfo.usage = 0
+            | SDL_GPU_TEXTUREUSAGE_GRAPHICS_STORAGE_READ
+            | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE
+        ;
+        return SDL_CreateGPUTexture(pDevice, &texCreateInfo);
+    }();
+    if (*ppTexture == nullptr) {
+        spdlog::error("Could not create GPU texture for compute shader output. Are we out of VRAM?");
+    }
+    SDL_SetGPUTextureName(pDevice, *ppTexture, "Output RGB (fried) Texture");
+    
+    *pIsNv12Format = (cameraFormat.format == SDL_PIXELFORMAT_NV12);
+}
+
+
 int main(int argc, char** args) {
     const bool debugMode = true;
     const char* preferredGpu = nullptr;
@@ -51,6 +150,8 @@ int main(int argc, char** args) {
 
     spdlog::info("Created GPU with driver {}", SDL_GetGPUDeviceDriver(gpu));
 
+    SDL_CameraID currentCamera = -1;
+    const char* currentCameraName = "No Camera";
     SDL_Camera* webcam = [&] {
         int cameraCount = 0;
         SDL_CameraID* cameras = SDL_GetCameras(&cameraCount);
@@ -61,6 +162,8 @@ int main(int argc, char** args) {
         for (int idx = 0; idx < cameraCount; ++idx) {
             SDL_Camera* tryCamera = SDL_OpenCamera(cameras[idx], nullptr);
             if (tryCamera != nullptr) {
+                currentCamera = cameras[idx];
+                currentCameraName = SDL_GetCameraName(currentCamera);
                 SDL_free(cameras);
                 return tryCamera;
             }
@@ -89,47 +192,18 @@ int main(int argc, char** args) {
         }
     }
 
-    SDL_CameraSpec webcamFormat = {};
-    if (!SDL_GetCameraFormat(webcam, &webcamFormat)) {
-        spdlog::error("Could not get camera format.");
-        exit(1);
-    }
-    else {
-        spdlog::info("Camera spec:\n"
-            "- Format: {:x}\n"
-            "- Colorspace: {:x}\n"
-            "- Width: {}\n"
-            "- Height: {}\n"
-            "- Framerate: {}/{} ({})"
-            , Uint64(webcamFormat.format)
-            , Uint64(webcamFormat.colorspace)
-            , webcamFormat.width
-            , webcamFormat.height
-            , webcamFormat.framerate_numerator
-            , webcamFormat.framerate_denominator
-            , float(webcamFormat.framerate_numerator) / float(webcamFormat.framerate_denominator)
-        );
-    }
-    // Frame is 1 plane of Y in full res, and one interleaved U+V plane in half-res (width * helf-height)
-    const Uint32 webcamYuvFrameSizeBytes = (3 * webcamFormat.width * webcamFormat.height) / 2;
     ConstantBufferData cbufData;
     for (int idx = 0; idx < 60; ++idx) {
         cbufData.padding[idx] = idx;
     }
-    for (int row = 0; row < 8; ++row) {
-        for (int col = 0; col < 8; ++col) {
-            const float quantVal = float((2 * row + 1) * (2 * col + 1)) / 255.0f;
-            cbufData.quantTable[row][col] = quantVal;
-            cbufData.quantTableInv[row][col] = 1.0f / quantVal;
-        }
-    }
-    cbufData.frameWidth = webcamFormat.width;
-    cbufData.frameHeight = webcamFormat.height;
-    cbufData.rowByteStride = webcamFormat.width;
-    cbufData.uvByteOffset = webcamFormat.width * webcamFormat.height;
+    SDL_GPUTransferBuffer* txBuffer = nullptr;
+    SDL_GPUBuffer* gpuCameraFrame = nullptr;
+    SDL_GPUTexture* cameraTexture = nullptr;
+    bool isNV12Format = false;
+    ResizeBuffersForCamera(webcam, gpu, &txBuffer, &gpuCameraFrame, &cameraTexture, &cbufData, &isNV12Format);
 
     // Now, create window, swapchain texture, and pipelines.
-    SDL_Window* window = SDL_CreateWindow("FriedCamera", 1280, 720, /*SDL_WINDOW_HIGH_PIXEL_DENSITY*/ 0);
+    SDL_Window* window = SDL_CreateWindow("FriedCamera", 1280, 720, SDL_WINDOW_HIGH_PIXEL_DENSITY);
     SDL_ClaimWindowForGPUDevice(gpu, window);
     SDL_SetGPUSwapchainParameters(gpu, window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, SDL_GPU_PRESENTMODE_VSYNC);
 
@@ -331,37 +405,6 @@ int main(int argc, char** args) {
         return computePipe;
     }();
 
-    SDL_GPUBuffer* gpuCameraFrame = [&] {
-        SDL_GPUBufferCreateInfo gpuCameraFrameBufferInfo;
-        gpuCameraFrameBufferInfo.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
-        gpuCameraFrameBufferInfo.size = webcamYuvFrameSizeBytes;
-        return SDL_CreateGPUBuffer(gpu, &gpuCameraFrameBufferInfo);
-    }();
-    if (gpuCameraFrame == nullptr) {
-        spdlog::error("Could not create GPU camera frame. Are we out of VRAM?");
-        exit(-1);
-    }
-    SDL_SetGPUBufferName(gpu, gpuCameraFrame, "GPU Camera Frame");
-
-    SDL_GPUTexture *texFried;
-    // Create RGB texture
-    {
-        SDL_GPUTextureCreateInfo texCreateInfo;
-        texCreateInfo.type = SDL_GPU_TEXTURETYPE_2D;
-        texCreateInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
-//        texCreateInfo.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
-        texCreateInfo.width = webcamFormat.width;
-        texCreateInfo.height = webcamFormat.height;
-        texCreateInfo.layer_count_or_depth = 1;
-        texCreateInfo.num_levels = 1;
-        texCreateInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
-        texCreateInfo.usage = 0
-            | SDL_GPU_TEXTUREUSAGE_GRAPHICS_STORAGE_READ
-            | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE
-        ;
-        texFried = SDL_CreateGPUTexture(gpu, &texCreateInfo);
-    }
-
     SDL_GPUSampler* sampler = [&]{
         SDL_GPUSamplerCreateInfo samplerInfo = {};
         samplerInfo.min_filter = SDL_GPU_FILTER_LINEAR;
@@ -386,20 +429,6 @@ int main(int argc, char** args) {
         }
         return sampler;
     }();
-
-    SDL_SetGPUTextureName(gpu, texFried, "Output RGB (fried) Texture");
-
-    SDL_GPUTransferBuffer* txBuffer = [&] {
-        SDL_GPUTransferBufferCreateInfo txBufferInfo;
-            txBufferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-            txBufferInfo.size = webcamYuvFrameSizeBytes;
-            txBufferInfo.props = 0;
-        return SDL_CreateGPUTransferBuffer(gpu, &txBufferInfo);
-    }();
-    if (txBuffer == nullptr) {
-        spdlog::error("Could not create image upload buffer! Error: {}", SDL_GetError());
-        exit(-1);
-    }
     
 #if 0 // Debug: capture images in advance so that we can close the camera when not in use.
     FILE* cameraOut = fopen("camera.raw", "wb");
@@ -436,6 +465,8 @@ int main(int argc, char** args) {
 
     bool shouldExit = false;
     SDL_GPUFence* frameFence = nullptr;
+    Uint32 cameraYuvFrameSizeBytes = (3 * cbufData.frameWidth * cbufData.frameHeight) / 2;
+    
     while (!shouldExit) {
         SDL_Event events;
         while(SDL_PollEvent(&events)) {
@@ -464,7 +495,7 @@ int main(int argc, char** args) {
 
         {
             auto* txPointer = static_cast<Uint8*>(SDL_MapGPUTransferBuffer(gpu, txBuffer, false));
-            std::copy_n(static_cast<const Uint8*>(cpuCameraSurface->pixels), webcamYuvFrameSizeBytes, txPointer);
+            std::copy_n(static_cast<const Uint8*>(cpuCameraSurface->pixels), cameraYuvFrameSizeBytes, txPointer);
             SDL_UnmapGPUTransferBuffer(gpu, txBuffer);
         }
         SDL_ReleaseCameraFrame(webcam, cpuCameraSurface);
@@ -473,6 +504,43 @@ int main(int argc, char** args) {
         ImGui_ImplSDLGPU3_NewFrame();
         ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
+
+        if (ImGui::BeginCombo("Camera", currentCameraName)) {
+            int numCameras = 0;
+            int selectedCamera = -1;
+            SDL_CameraID *cameras = SDL_GetCameras(&numCameras);
+
+            for (int n = 0; n < numCameras; n++)
+            {
+                const bool isSelected = (selectedCamera == n);
+                if (ImGui::Selectable(SDL_GetCameraName(cameras[n]), isSelected)) {
+                    selectedCamera = n;
+                }
+
+                // Set the initial focus when opening the combo (scrolling + keyboard navigation focus)
+                if (isSelected) {
+                    ImGui::SetItemDefaultFocus();
+                }
+            }
+            
+            // User selected a new camera
+            if (selectedCamera != -1 && cameras[selectedCamera] != currentCamera) {
+                SDL_CloseCamera(webcam);
+                webcam = SDL_OpenCamera(cameras[selectedCamera], nullptr);
+                currentCamera = cameras[selectedCamera];
+                currentCameraName = SDL_GetCameraName(currentCamera);
+                ResizeBuffersForCamera(webcam, gpu, &txBuffer, &gpuCameraFrame, &cameraTexture, &cbufData, &isNV12Format);
+                cameraYuvFrameSizeBytes = (3 * cbufData.frameWidth * cbufData.frameHeight) / 2;
+            }
+            SDL_free(cameras);
+
+            ImGui::EndCombo();
+        }
+        
+        if (!isNV12Format) {
+            ImGui::Text("WARNING: Camera data is not SDL_PIXELFORMAT_NV12!");
+            ImGui::Text("The shader may read or output garbage.");
+        }
 
         static float crunchBase = 3.f;
         static float crunchX = 5.f;
@@ -506,12 +574,12 @@ int main(int argc, char** args) {
                 SDL_GPUBufferRegion gpuBufferLoc;
                 gpuBufferLoc.buffer = gpuCameraFrame;
                 gpuBufferLoc.offset = 0;
-                gpuBufferLoc.size = webcamYuvFrameSizeBytes;
+                gpuBufferLoc.size = cameraYuvFrameSizeBytes;
                 SDL_UploadToGPUBuffer(uploadPass, &cpuBufferLoc, &gpuBufferLoc, false);
             } SDL_EndGPUCopyPass(uploadPass);
 
             SDL_GPUStorageTextureReadWriteBinding outputTextureBinding = {0};
-                outputTextureBinding.texture = texFried;
+                outputTextureBinding.texture = cameraTexture;
 
             static constexpr Uint32 numWriteTextures = 1;
             static constexpr Uint32 numWriteBuffers = 0;
@@ -524,8 +592,8 @@ int main(int argc, char** args) {
                 static constexpr Uint32 constantBufferSlot = 0;
                 SDL_PushGPUComputeUniformData(frameCmdBuf, constantBufferSlot, &cbufData, sizeof(ConstantBufferData));
 
-                const Uint32 numBlockX = webcamFormat.width / 16;
-                const Uint32 numBlockY = webcamFormat.height / 16;
+                const Uint32 numBlockX = cbufData.frameWidth / 16;
+                const Uint32 numBlockY = cbufData.frameHeight / 16;
                 static constexpr Uint32 numBlockZ = 1;
                 SDL_DispatchGPUCompute(computePass
                     , numBlockX
@@ -547,7 +615,7 @@ int main(int argc, char** args) {
             const SDL_GPUTextureSamplerBinding samplerBinding = [&] {
                 SDL_GPUTextureSamplerBinding samplerBinding;
                 samplerBinding.sampler = sampler;
-                samplerBinding.texture = texFried;
+                samplerBinding.texture = cameraTexture;
 
                 return samplerBinding;
             }();
@@ -578,7 +646,7 @@ int main(int argc, char** args) {
 
     SDL_ReleaseGPUTransferBuffer(gpu, txBuffer);
     SDL_ReleaseGPUBuffer(gpu, gpuCameraFrame);
-    SDL_ReleaseGPUTexture(gpu, texFried);
+    SDL_ReleaseGPUTexture(gpu, cameraTexture);
 
     // SDL_free(shaderCode);
     SDL_DestroyGPUDevice(gpu);
