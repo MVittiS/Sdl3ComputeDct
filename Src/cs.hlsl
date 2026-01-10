@@ -8,8 +8,8 @@ struct ProcessingParams {
     // Without this, the last few elements of the struct are dropped.
     uint4 padding[15];
     
-    // D3D is also annoying with float packing; you need to use float4
-    //  for constant buffers. Ugh...
+    // D3D is also annoying with arrays; you need to use <type>4 for
+    //  constant buffers, or they get promoted automatically. Ugh...
     float4 quantTable[8][2];
     float4 quantTableInv[8][2];
 };
@@ -18,13 +18,15 @@ ByteAddressBuffer inputRawYuvFrame      : register(t0, space0);
 RWTexture2D<float3> outputTexture       : register(u0, space1);
 ConstantBuffer<ProcessingParams> params : register(b0, space2);
 
-groupshared float y[16][16];
-groupshared float u[8][8];
-groupshared float v[8][8];
+groupshared half y[16][16];    // 512B
+groupshared half u[8][8];      // 128B
+groupshared half v[8][8];      // 128B
 
-groupshared float dctY[16][16];
-groupshared float dctU[8][8];
-groupshared float dctV[8][8];
+groupshared half dctY[16][16]; // 512B
+groupshared half dctU[8][8];   // 128B
+groupshared half dctV[8][8];   // 128B
+
+// Total shared memory per threadgroup: 1.5KiB
 
 float QuantizeFloat(float x, float quantFactor, float invQuantFactor) {
     const float quantX = round(x * invQuantFactor);

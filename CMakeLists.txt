@@ -163,7 +163,8 @@ if (WIN32)
             # ${CMAKE_BINARY_DIR}/cs.rootsig.json
         COMMAND
             ${DXC_PATH}
-            -T cs_6_0
+            -enable-16bit-types
+            -T cs_6_2 // Support for true fp16
             -E CSMain
             ${CMAKE_CURRENT_SOURCE_DIR}/Src/cs.hlsl
             -Fo ${CMAKE_BINARY_DIR}/cs.dxil
