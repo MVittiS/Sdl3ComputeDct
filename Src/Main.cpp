@@ -401,7 +401,7 @@ int main(int argc, char** args) {
         exit(-1);
     }
     
-#if 1 // Debug: capture images in advance so that we can close the camera when not in use.
+#if 0 // Debug: capture images in advance so that we can close the camera when not in use.
     FILE* cameraOut = fopen("camera.raw", "wb");
     if (!cameraOut) {
         spdlog::error("Could not open 'camera.raw' file.");
@@ -454,7 +454,7 @@ int main(int argc, char** args) {
             SDL_ReleaseGPUFence(gpu, frameFence);
             frameFence = nullptr;
         }
-#if 0
+#if 1
         [[maybe_unused]] Uint64 frameTimestamp;
         SDL_Surface* cpuCameraSurface = SDL_AcquireCameraFrame(webcam, &frameTimestamp);
         if (cpuCameraSurface == nullptr) {
@@ -474,8 +474,21 @@ int main(int argc, char** args) {
         ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
 
-        static bool showDemoWindow = true;
-        ImGui::ShowDemoWindow(&showDemoWindow);
+        static float crunchBase = 3.f;
+        static float crunchX = 5.f;
+        static float crunchY = 5.f;
+
+        ImGui::SliderFloat("Crunch Base Factor", &crunchBase, 1, 128, "%.2f", ImGuiSliderFlags_Logarithmic);
+        ImGui::SliderFloat("Crunch Horizontal Factor", &crunchX, 0.1, 128, "%.2f", ImGuiSliderFlags_Logarithmic);
+        ImGui::SliderFloat("Crunch Vertical Factor", &crunchY, 0.1, 128, "%.2f", ImGuiSliderFlags_Logarithmic);
+
+        for (int row = 0; row < 8; ++row) {
+            for (int col = 0; col < 8; ++col) {
+                const float quantVal = float((crunchY * row + crunchBase) * (crunchX * col + crunchBase)) / 255.0f;
+                cbufData.quantTable[row][col] = quantVal;
+                cbufData.quantTableInv[row][col] = 1.0f / quantVal;
+            }
+        }
 
         ImGui::Render();
         ImDrawData* imGuiDrawData = ImGui::GetDrawData();

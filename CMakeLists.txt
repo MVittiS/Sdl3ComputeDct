@@ -33,13 +33,13 @@ if (WIN32)
             ${CMAKE_BINARY_DIR}/vs.dxil
         COMMAND
             ${DXC_PATH}
-            -T vs_5_0
+            -T vs_6_0
             -E VSMain
             ${CMAKE_CURRENT_SOURCE_DIR}/Src/vs.hlsl
             -Fo ${CMAKE_BINARY_DIR}/vs.dxil
             -Zi
             -Qembed_debug
-            -O0
+            -O3
         VERBATIM
     )
 elseif(APPLE)
@@ -97,13 +97,13 @@ if (WIN32)
             ${CMAKE_BINARY_DIR}/fs.dxil
         COMMAND
             ${DXC_PATH}
-            -T ps_5_0
+            -T ps_6_0
             -E FSMain
             ${CMAKE_CURRENT_SOURCE_DIR}/Src/fs.hlsl
             -Fo ${CMAKE_BINARY_DIR}/fs.dxil
             -Zi
             -Qembed_debug
-            -O0
+            -O3
         VERBATIM
     )
 elseif(APPLE)
@@ -170,7 +170,8 @@ if (WIN32)
             # -Frs ${CMAKE_BINARY_DIR}/cs.rootsig.json
             -Zi
             -Qembed_debug
-            -O0
+            -O3
+            -ffinite-math-only
         #     -MF ${CMAKE_BINARY_DIR}/cs.depfile
         # DEPFILE
         #     ${CMAKE_BINARY_DIR}/cs.depfile
