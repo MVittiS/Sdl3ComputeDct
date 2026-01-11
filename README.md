@@ -63,7 +63,7 @@ Using the tools best supported by each vendor (Metal Debugger, PIX, and Nsight G
 
 | Vendor |              GPU          |  Release   | Node       |
 |--------|---------------------------|------------|------------|
-| Apple  | M4 10-core                | May 2024   | TSMC N3E   |
+| Apple  | M4 (10-core)              | May 2024   | TSMC N3E   |
 | Intel  | UHD 630                   | Sep. 2017  | Intel 14nm |
 | NVIDIA | GeForce RTX 2060 (mobile) | Oct. 2018  | TSMC 12FFC |
 
@@ -72,14 +72,14 @@ Using the tools best supported by each vendor (Metal Debugger, PIX, and Nsight G
 |    GPU    |  Power State  | Resolution  | Duration(µs) | MPixels/s |
 |-----------|---------------|-------------|--------------|-----------|
 | M4        | Min Power     | 1920 x 1072 |        3'010 |      683  |
-| M4        | Min Power     | 3840 x 2160 |       12'030 |      689  |
-| M4        | Max Power     | 1920 x 1072 |          642 |    3'205  |
-| M4        | Max Power     | 3840 x 2160 |        2'580 |    3'214  |
+|           |               | 3840 x 2160 |       12'030 |      689  |
+|           | Max Power     | 1920 x 1072 |          642 |    3'205  |
+|           |               | 3840 x 2160 |        2'580 |    3'214  |
 | UHD 630   | Low Power     | 1280 x 720  |        5'750 |      160  |
-| UHD 630   | Low Power     | 3840 x 216  |       49'427 |      167  |
-| UHD 630   | High Power    | 1280 x 720  |        2'131 |      432  |
-| UHD 630   | High Power    | 3840 x 216  |       17'940 |      462  |
+|           |               | 3840 x 216  |       49'427 |      167  |
+|           | High Power    | 1280 x 720  |        2'131 |      432  |
+|           |               | 3840 x 216  |       17'940 |      462  |
 | RTX 2060  | Lock to Base  | 1280 x 720  |          628 |    1'468  |
-| RTX 2060  | Lock to Base  | 3840 x 216  |        5'128 |    1'617  |
-| RTX 2060  | Lock to Boost | 1280 x 720  |          571 |    1'614  |
-| RTX 2060  | Lock to Boost | 3840 x 216  |        4'724 |    1'756  |
+|           |               | 3840 x 216  |        5'128 |    1'617  |
+|           | Lock to Boost | 1280 x 720  |          571 |    1'614  |
+|           |               | 3840 x 216  |        4'724 |    1'756  |
