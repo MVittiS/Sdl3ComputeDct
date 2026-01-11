@@ -3,20 +3,23 @@
 #include <imgui_impl_sdlgpu3.h>
 
 #include <SDL3/SDL_camera.h>
+#include <SDL3/SDL_endian.h>
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_gpu.h>
 #include <SDL3/SDL_init.h>
-#include <SDL3/SDL_oldnames.h>
-#include <SDL3/SDL_stdinc.h>
 #include <SDL3/SDL_timer.h>
 #include <SDL3/SDL_video.h>
+
+#include <spdlog/spdlog.h>
+
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <stb_image_write.h>
 
 #include <chrono>
 #include <cstddef>
 #include <cstdio>
 #include <random>
-#include <spdlog/spdlog.h>
 #include <vector>
 
 struct ConstantBufferData {
@@ -33,6 +36,7 @@ static_assert((sizeof(ConstantBufferData) % 256 == 0), "ConstantBufferData needs
 void ResizeBuffersForCamera(SDL_Camera* pCamera
     , SDL_GPUDevice *pDevice
     , SDL_GPUTransferBuffer **ppTxBuffer
+    , SDL_GPUTransferBuffer **ppRxBuffer
     , SDL_GPUBuffer **ppBuffer
     , SDL_GPUTexture **ppTexture
     , ConstantBufferData *pCBufData
@@ -70,6 +74,9 @@ void ResizeBuffersForCamera(SDL_Camera* pCamera
     if (*ppTxBuffer) {
         SDL_ReleaseGPUTransferBuffer(pDevice, *ppTxBuffer);
     }
+    if (*ppRxBuffer) {
+        SDL_ReleaseGPUTransferBuffer(pDevice, *ppRxBuffer);
+    }
     if (*ppBuffer) {
         SDL_ReleaseGPUBuffer(pDevice, *ppBuffer);
     }
@@ -87,6 +94,19 @@ void ResizeBuffersForCamera(SDL_Camera* pCamera
     }();
     if (*ppTxBuffer == nullptr) {
         spdlog::error("Could not create image upload buffer! Error: {}", SDL_GetError());
+        exit(-1);
+    }
+
+    // Create Texture download buffer
+    *ppRxBuffer = [&] {
+        SDL_GPUTransferBufferCreateInfo rxBufferInfo;
+            rxBufferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
+            rxBufferInfo.size = cameraFormat.width * cameraFormat.height * 4;
+            rxBufferInfo.props = 0;
+            return SDL_CreateGPUTransferBuffer(pDevice, &rxBufferInfo);
+    }();
+    if (*ppRxBuffer == nullptr) {
+        spdlog::error("Could not create image download buffer! Error: {}", SDL_GetError());
         exit(-1);
     }
     
@@ -108,7 +128,6 @@ void ResizeBuffersForCamera(SDL_Camera* pCamera
         SDL_GPUTextureCreateInfo texCreateInfo;
         texCreateInfo.type = SDL_GPU_TEXTURETYPE_2D;
         texCreateInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
-//        texCreateInfo.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
         texCreateInfo.width = cameraFormat.width;
         texCreateInfo.height = cameraFormat.height;
         texCreateInfo.layer_count_or_depth = 1;
@@ -197,10 +216,11 @@ int main(int argc, char** args) {
         cbufData.padding[idx] = idx;
     }
     SDL_GPUTransferBuffer* txBuffer = nullptr;
+    SDL_GPUTransferBuffer* rxBuffer = nullptr;
     SDL_GPUBuffer* gpuCameraFrame = nullptr;
     SDL_GPUTexture* cameraTexture = nullptr;
     bool isNV12Format = false;
-    ResizeBuffersForCamera(webcam, gpu, &txBuffer, &gpuCameraFrame, &cameraTexture, &cbufData, &isNV12Format);
+    ResizeBuffersForCamera(webcam, gpu, &txBuffer, &rxBuffer, &gpuCameraFrame, &cameraTexture, &cbufData, &isNV12Format);
 
     // Now, create window, swapchain texture, and pipelines.
     SDL_Window* window = SDL_CreateWindow("FriedCamera", 1280, 720, SDL_WINDOW_HIGH_PIXEL_DENSITY);
@@ -464,9 +484,13 @@ int main(int argc, char** args) {
     
 
     bool shouldExit = false;
+    bool saveTexture = false;
     SDL_GPUFence* frameFence = nullptr;
     Uint32 cameraYuvFrameSizeBytes = (3 * cbufData.frameWidth * cbufData.frameHeight) / 2;
-    
+    char imagePath[64];
+    int imageCount = 1;
+    SDL_snprintf(imagePath, 64, "Image%d.png", imageCount);
+
     while (!shouldExit) {
         SDL_Event events;
         while(SDL_PollEvent(&events)) {
@@ -485,6 +509,16 @@ int main(int argc, char** args) {
             SDL_ReleaseGPUFence(gpu, frameFence);
             frameFence = nullptr;
         }
+        if (saveTexture) {
+            const void* rgbaBuffer = static_cast<Uint32*>(SDL_MapGPUTransferBuffer(gpu, rxBuffer, false)); {
+                static constexpr int numChannels = 4;
+                stbi_write_png(imagePath, cbufData.frameWidth, cbufData.frameHeight, numChannels, rgbaBuffer, cbufData.frameWidth * 4);
+            } SDL_UnmapGPUTransferBuffer(gpu, rxBuffer);
+            ++imageCount;
+            SDL_snprintf(imagePath, 64, "Image%d.png", imageCount);
+            saveTexture = false;
+        }
+
 #if 1
         [[maybe_unused]] Uint64 frameTimestamp;
         SDL_Surface* cpuCameraSurface = SDL_AcquireCameraFrame(webcam, &frameTimestamp);
@@ -529,7 +563,7 @@ int main(int argc, char** args) {
                 webcam = SDL_OpenCamera(cameras[selectedCamera], nullptr);
                 currentCamera = cameras[selectedCamera];
                 currentCameraName = SDL_GetCameraName(currentCamera);
-                ResizeBuffersForCamera(webcam, gpu, &txBuffer, &gpuCameraFrame, &cameraTexture, &cbufData, &isNV12Format);
+                ResizeBuffersForCamera(webcam, gpu, &txBuffer, &rxBuffer, &gpuCameraFrame, &cameraTexture, &cbufData, &isNV12Format);
                 cameraYuvFrameSizeBytes = (3 * cbufData.frameWidth * cbufData.frameHeight) / 2;
             }
             SDL_free(cameras);
@@ -558,6 +592,10 @@ int main(int argc, char** args) {
             }
         }
 
+        char buttonText[64];
+        SDL_snprintf(buttonText, 64, "Save result to %s", imagePath);
+        saveTexture = ImGui::Button(buttonText);
+
         ImGui::Render();
         ImDrawData* imGuiDrawData = ImGui::GetDrawData();
 
@@ -567,7 +605,7 @@ int main(int argc, char** args) {
         SDL_GPUCommandBuffer* frameCmdBuf = SDL_AcquireGPUCommandBuffer(gpu); {
             SDL_WaitAndAcquireGPUSwapchainTexture(frameCmdBuf, window, &swapchainTexture, &swapchainWidth, &swapchainHeight);
 
-            SDL_GPUCopyPass* uploadPass = SDL_BeginGPUCopyPass(frameCmdBuf); {
+            SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(frameCmdBuf); {
                 SDL_GPUTransferBufferLocation cpuBufferLoc;
                     cpuBufferLoc.offset = 0;
                     cpuBufferLoc.transfer_buffer = txBuffer;
@@ -575,8 +613,22 @@ int main(int argc, char** args) {
                 gpuBufferLoc.buffer = gpuCameraFrame;
                 gpuBufferLoc.offset = 0;
                 gpuBufferLoc.size = cameraYuvFrameSizeBytes;
-                SDL_UploadToGPUBuffer(uploadPass, &cpuBufferLoc, &gpuBufferLoc, false);
-            } SDL_EndGPUCopyPass(uploadPass);
+                SDL_UploadToGPUBuffer(copyPass, &cpuBufferLoc, &gpuBufferLoc, false);
+
+                if (saveTexture) {
+                    SDL_GPUTextureTransferInfo texRxInfo = {0};
+                        texRxInfo.offset = 0;
+                        texRxInfo.transfer_buffer = rxBuffer;
+                        texRxInfo.pixels_per_row = cbufData.frameWidth;
+                        texRxInfo.rows_per_layer = cbufData.frameHeight;
+                    SDL_GPUTextureRegion texRegion = {};
+                        texRegion.texture = cameraTexture;
+                        texRegion.w = cbufData.frameWidth;
+                        texRegion.h = cbufData.frameHeight;
+                        texRegion.d = 1;
+                    SDL_DownloadFromGPUTexture(copyPass, &texRegion, &texRxInfo);
+                }
+            } SDL_EndGPUCopyPass(copyPass);
 
             SDL_GPUStorageTextureReadWriteBinding outputTextureBinding = {0};
                 outputTextureBinding.texture = cameraTexture;

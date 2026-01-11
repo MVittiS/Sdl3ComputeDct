@@ -15,7 +15,7 @@ struct ProcessingParams {
 };
 
 ByteAddressBuffer inputRawYuvFrame      : register(t0, space0);
-RWTexture2D<float3> outputTexture       : register(u0, space1);
+RWTexture2D<float4> outputTexture       : register(u0, space1);
 ConstantBuffer<ProcessingParams> params : register(b0, space2);
 
 groupshared half y[16][16];    // 512B
@@ -202,8 +202,8 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
     const float3 cy1x0 = float3(localY[2], u[(8 + localId.y) / 2][(0 + localId.x) / 2], v[(8 + localId.y) / 2][(0 + localId.x) / 2]);
     const float3 cy1x1 = float3(localY[3], u[(8 + localId.y) / 2][(8 + localId.x) / 2], v[(8 + localId.y) / 2][(8 + localId.x) / 2]);
 
-    outputTexture[(16 * blockId.xy) + localId.xy + (8 * x0y0)] = clamp(mul(yuvToRgb, cy0x0), zeros, ones);
-    outputTexture[(16 * blockId.xy) + localId.xy + (8 * x1y0)] = clamp(mul(yuvToRgb, cy0x1), zeros, ones);
-    outputTexture[(16 * blockId.xy) + localId.xy + (8 * x0y1)] = clamp(mul(yuvToRgb, cy1x0), zeros, ones);
-    outputTexture[(16 * blockId.xy) + localId.xy + (8 * x1y1)] = clamp(mul(yuvToRgb, cy1x1), zeros, ones);
+    outputTexture[(16 * blockId.xy) + localId.xy + (8 * x0y0)] = float4(clamp(mul(yuvToRgb, cy0x0), zeros, ones), 1.0);
+    outputTexture[(16 * blockId.xy) + localId.xy + (8 * x1y0)] = float4(clamp(mul(yuvToRgb, cy0x1), zeros, ones), 1.0);
+    outputTexture[(16 * blockId.xy) + localId.xy + (8 * x0y1)] = float4(clamp(mul(yuvToRgb, cy1x0), zeros, ones), 1.0);
+    outputTexture[(16 * blockId.xy) + localId.xy + (8 * x1y1)] = float4(clamp(mul(yuvToRgb, cy1x1), zeros, ones), 1.0);
 }

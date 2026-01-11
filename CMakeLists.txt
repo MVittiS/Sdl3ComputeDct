@@ -5,6 +5,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS true)
 find_package(imgui CONFIG REQUIRED)
 find_package(SDL3 REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
+find_package(Stb REQUIRED)
 
 option(SHADERCROSS_PATH "Path to SDL_shadercross executable")
 
@@ -249,7 +250,8 @@ target_compile_features(ComputeDct
 )
 target_include_directories(ComputeDct
     PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/Src
+        ${Stb_INCLUDE_DIR}
 )
 target_compile_options(ComputeDct
     PRIVATE
