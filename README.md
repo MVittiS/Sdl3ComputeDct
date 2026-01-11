@@ -7,6 +7,8 @@ This repository contains a simple application using [SDL_gpu](https://wiki.libsd
 * Using `groupshared` memory and barriers to perform DCT, quantization, and IDCT in a single compute dispatch
 * Applying [imgui](https://github.com/ocornut/imgui)'s SDL3 + SDL_gpu backend to a simple interactive app
 
+[!][Example image from application, demonstrating live DCT quantization effect.](Example.png)
+
 It's also an excuse to explore targeted optimizations for a non-trivial but uniform compute kernel on different GPUs, with different profiling tools. And they tell different stories: Nsight Graphics says that the kernel is bottlenecked on VRAM bandwidth, while Metal Debugger says that it's bottlenecked on instruction issue.
 
 ## Limitations
