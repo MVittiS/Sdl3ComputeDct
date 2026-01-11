@@ -1,6 +1,6 @@
 # SDL 3 Compute DCT
 
-This repository contains a simple application using SDL_gpu that applies a JPEG-style DCT quantization effect to images from a camera feed in real-time, using compute shaders to let you adjust the quantization factors. It's a simple demonstration of:
+This repository contains a simple application using [SDL_gpu](https://wiki.libsdl.org/SDL3/CategoryGPU) that applies a JPEG-style DCT quantization effect to images from a camera feed in real-time, using compute shaders to let you adjust the quantization factors. It's a simple demonstration of:
 
 * Reading image data from a camera using the [SDL3 Camera API](https://wiki.libsdl.org/SDL3/CategoryCamera), including waiting for permissions on systems like macOS
 * Using HLSL shaders with [SDL_shadercross](https://github.com/libsdl-org/SDL_shadercross) on non-Windows systems
