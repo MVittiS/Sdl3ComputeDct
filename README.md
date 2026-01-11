@@ -7,11 +7,14 @@ This repository contains a simple application using SDL_gpu that applies a JPEG-
 * Using `groupshared` memory and barriers to perform DCT, quantization, and IDCT in a single compute dispatch
 * Applying [imgui](https://github.com/ocornut/imgui)'s SDL3 + SDL_gpu backend to a simple interactive app
 
+It's also an excuse to explore targeted optimizations for a non-trivial but uniform compute kernel on different GPUs, with different profiling tools. And they tell different stories: Nsight Graphics says that the kernel is bottlenecked on VRAM bandwidth, while Metal Debugger says that it's bottlenecked on instruction issue.
+
 ## Limitations
 
 * The code assumes that the camera feed is in the NV12_YUV format (as reported by SDL). If that's not the case, the UI will display a warning message.
 * The code assumes that your camera's image is 16:9. Using any other aspect ratio (like 4:3) will apply the DCT effect correctly, but the output texture will be rendered stretched.
 * The window is always 1280x720, non-resizable. Most webcams I came across output in this resolution.
+* The compute kernel only works in 16x16 pixel blocks. Because of the way memory accesses are distributed, we can't use thread masking to only read the valid range of an image, so we only process up to the last integer multiple of 16px in both dimensions - for 1920x1080, that's 1920 (120x16) by 1072 (67x16).
 
 ## Build Prerequisites
 
@@ -51,3 +54,32 @@ $> cmake --build .
 ```
 
 Make sure to run the executable from the built directory so that it picks up the compiled shader files (`.dxil` on Windows, `.metallib` on macOS, and `.spirv` on Linux).
+
+## Lil' Benchmarks
+
+Using the tools best supported by each vendor (Metal Debugger, PIX, and Nsight Graphics), we get the following numbers just for the compute kernel.
+
+### GPUs tested
+
+| Vendor |              GPU          |  Release   | Node       |
+|--------|---------------------------|------------|------------|
+| Apple  | M4 10-core                | May 2024   | TSMC N3E   |
+| Intel  | UHD 630                   | Sep. 2017  | Intel 14nm |
+| NVIDIA | GeForce RTX 2060 (mobile) | Oct. 2018  | TSMC 12FFC |
+
+### Numbers
+
+|    GPU    |  Power State  | Resolution  | Duration(µs) | MPixels/s |
+|-----------|---------------|-------------|--------------|-----------|
+| M4        | Min Power     | 1920 x 1072 |        3'010 |      683  |
+| M4        | Min Power     | 3840 x 2160 |       12'030 |      689  |
+| M4        | Max Power     | 1920 x 1072 |          642 |    3'205  |
+| M4        | Max Power     | 3840 x 2160 |        2'580 |    3'214  |
+| UHD 630   | Low Power     | 1280 x 720  |        5'750 |      160  |
+| UHD 630   | Low Power     | 3840 x 216  |       49'427 |      167  |
+| UHD 630   | High Power    | 1280 x 720  |        2'131 |      432  |
+| UHD 630   | High Power    | 3840 x 216  |       17'940 |      462  |
+| RTX 2060  | Lock to Base  | 1280 x 720  |          628 |    1'468  |
+| RTX 2060  | Lock to Base  | 3840 x 216  |        5'128 |    1'617  |
+| RTX 2060  | Lock to Boost | 1280 x 720  |          571 |    1'614  |
+| RTX 2060  | Lock to Boost | 3840 x 216  |        4'724 |    1'756  |
