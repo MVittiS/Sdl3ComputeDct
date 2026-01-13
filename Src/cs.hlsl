@@ -1,3 +1,5 @@
+#define SEPARABLE_DCT
+
 struct ProcessingParams {
     uint frameWidth;
     uint frameHeight;
@@ -112,19 +114,10 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
     GroupMemoryBarrierWithGroupSync();
 
     // Stage 2 - DCT and destructive quantization
-
-    dctY[localId.y + 0][localId.x + 0] = .0f;
-    dctY[localId.y + 0][localId.x + 8] = .0f;
-    dctY[localId.y + 8][localId.x + 0] = .0f;
-    dctY[localId.y + 8][localId.x + 8] = .0f;
-
-    dctU[localId.y][localId.x] = .0f;
-    dctV[localId.y][localId.x] = .0f;
-
     float4 localDctY = .0f;
     float localDctU = .0f;
     float localDctV = .0f;
-
+#if !defined(SEPARABLE_DCT)
     for (int row = 0; row != 8; ++row) {
         const float rowCoeff = dctCoeffs[localId.y][row];
         for (int col = 0; col != 8; ++col) {
@@ -155,6 +148,66 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
     dctU[localId.y][localId.x] = localDctU;
     dctV[localId.y][localId.x] = localDctV;
 
+#else
+    // First, do a 1D DCT on each row.
+    for (int col = 0; col != 8; ++col) {
+        const int row = localId.y;
+        const float coeff = dctCoeffs[localId.x][col];
+        localDctY[0] += y[row + 0][col + 0] * coeff;
+        localDctY[1] += y[row + 0][col + 8] * coeff;
+        localDctY[2] += y[row + 8][col + 0] * coeff;
+        localDctY[3] += y[row + 8][col + 8] * coeff;
+        localDctU += u[row][col] * coeff;
+        localDctV += v[row][col] * coeff;
+    }
+
+    dctY[localId.y + 0][localId.x + 0] = localDctY[0];
+    dctY[localId.y + 0][localId.x + 8] = localDctY[1];
+    dctY[localId.y + 8][localId.x + 0] = localDctY[2];
+    dctY[localId.y + 8][localId.x + 8] = localDctY[3];
+
+    dctU[localId.y][localId.x] = localDctU;
+    dctV[localId.y][localId.x] = localDctV;
+
+    GroupMemoryBarrierWithGroupSync();
+
+    float4 localDctY2 = .0f;
+    float localDctU2 = .0f;
+    float localDctV2 = .0f;
+
+    // Then, apply a 1D DCT on each column of the previous
+    //  data.
+    for (int row = 0; row != 8; ++row) {
+        const int col = localId.x;
+        const float coeff = dctCoeffs[localId.y][row];
+        localDctY2[0] += dctY[row + 0][col + 0] * coeff;
+        localDctY2[1] += dctY[row + 0][col + 8] * coeff;
+        localDctY2[2] += dctY[row + 8][col + 0] * coeff;
+        localDctY2[3] += dctY[row + 8][col + 8] * coeff;
+        localDctU2 += dctU[row][col] * coeff;
+        localDctV2 += dctV[row][col] * coeff;
+    }
+    
+    const float localQuant    = params.quantTable   [localId.y][localId.x / 4][localId.x % 4];
+    const float localQuantInv = params.quantTableInv[localId.y][localId.x / 4][localId.x % 4];
+    localDctY2[0] = QuantizeFloat(localDctY2[0], localQuant, localQuantInv);
+    localDctY2[1] = QuantizeFloat(localDctY2[1], localQuant, localQuantInv);
+    localDctY2[2] = QuantizeFloat(localDctY2[2], localQuant, localQuantInv);
+    localDctY2[3] = QuantizeFloat(localDctY2[3], localQuant, localQuantInv);
+    localDctU2 = QuantizeFloat(localDctU2, localQuant, localQuantInv);
+    localDctV2 = QuantizeFloat(localDctV2, localQuant, localQuantInv);
+
+    GroupMemoryBarrierWithGroupSync();
+    
+    dctY[localId.y + 0][localId.x + 0] = localDctY2[0];
+    dctY[localId.y + 0][localId.x + 8] = localDctY2[1];
+    dctY[localId.y + 8][localId.x + 0] = localDctY2[2];
+    dctY[localId.y + 8][localId.x + 8] = localDctY2[3];
+
+    dctU[localId.y][localId.x] = localDctU2;
+    dctV[localId.y][localId.x] = localDctV2;
+#endif
+
     GroupMemoryBarrierWithGroupSync();
 
     // Stage 3 - IDCT and write to texture
@@ -162,6 +215,7 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
     float localU = .0f;
     float localV = .0f;
 
+#if !defined(SEPARABLE_DCT)
     for (int row = 0; row != 8; ++row) {
         const float rowCoeff = dctCoeffs[row][localId.y];
         for (int col = 0; col != 8; ++col) {
@@ -177,6 +231,49 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
     
     u[localId.y][localId.x] = localU;
     v[localId.y][localId.x] = localV;
+#else
+    float4 localY1 = .0f;
+    float localU1 = .0f;
+    float localV1 = .0f;
+    
+    // First, do the 1D IDCT on each row.
+    for (int col = 0; col != 8; ++col) {
+        const int row = localId.y;
+        const float coeff = dctCoeffs[col][localId.x];
+        localY1[0] += dctY[row + 0][col + 0] * coeff;
+        localY1[1] += dctY[row + 0][col + 8] * coeff;
+        localY1[2] += dctY[row + 8][col + 0] * coeff;
+        localY1[3] += dctY[row + 8][col + 8] * coeff;
+        localU1 += dctU[row][col] * coeff;
+        localV1 += dctV[row][col] * coeff;
+    }
+    
+    y[localId.y + 0][localId.x + 0] = localY1[0];
+    y[localId.y + 0][localId.x + 8] = localY1[1];
+    y[localId.y + 8][localId.x + 0] = localY1[2];
+    y[localId.y + 8][localId.x + 8] = localY1[3];
+    u[localId.y][localId.x] = localU1;
+    v[localId.y][localId.x] = localV1;
+
+    GroupMemoryBarrierWithGroupSync();
+
+    // Then, do the 1D IDCT on each column.
+    for (int row = 0; row != 8; ++row) {
+        const int col = localId.x;
+        const float coeff = dctCoeffs[row][localId.y];
+        localY[0] += y[row + 0][col + 0] * coeff;
+        localY[1] += y[row + 0][col + 8] * coeff;
+        localY[2] += y[row + 8][col + 0] * coeff;
+        localY[3] += y[row + 8][col + 8] * coeff;
+        localU += u[row][col] * coeff;
+        localV += v[row][col] * coeff;
+    }
+    
+    GroupMemoryBarrierWithGroupSync();
+
+    u[localId.y][localId.x] = localU;
+    v[localId.y][localId.x] = localV;
+#endif
 
     GroupMemoryBarrierWithGroupSync();
 
