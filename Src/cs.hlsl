@@ -1,4 +1,6 @@
 #define SEPARABLE_DCT
+//#define STORAGE_TYPE half
+#define STORAGE_TYPE float
 
 struct ProcessingParams {
     uint frameWidth;
@@ -20,13 +22,13 @@ ByteAddressBuffer inputRawYuvFrame      : register(t0, space0);
 RWTexture2D<float4> outputTexture       : register(u0, space1);
 ConstantBuffer<ProcessingParams> params : register(b0, space2);
 
-groupshared half y[16][16];    // 512B
-groupshared half u[8][8];      // 128B
-groupshared half v[8][8];      // 128B
+groupshared STORAGE_TYPE y[16][16];    // 512B
+groupshared STORAGE_TYPE u[8][8];      // 128B
+groupshared STORAGE_TYPE v[8][8];      // 128B
 
-groupshared half dctY[16][16]; // 512B
-groupshared half dctU[8][8];   // 128B
-groupshared half dctV[8][8];   // 128B
+groupshared STORAGE_TYPE dctY[16][16]; // 512B
+groupshared STORAGE_TYPE dctU[8][8];   // 128B
+groupshared STORAGE_TYPE dctV[8][8];   // 128B
 
 // Total shared memory per threadgroup: 1.5KiB
 
@@ -88,12 +90,12 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
     const uint localRowToStore = 2 * localId.y + uint(isLocalOddRow);
     const uint localColToStore = 4 * (localId.x - (isLocalOddRow ? 4 : 0));
 
-    y[localRowToStore][localColToStore + 0] = half(((yValues >>  0) & 0xFF) * (1.0f / 255.0f));
-    y[localRowToStore][localColToStore + 1] = half(((yValues >>  8) & 0xFF) * (1.0f / 255.0f));
-    y[localRowToStore][localColToStore + 2] = half(((yValues >> 16) & 0xFF) * (1.0f / 255.0f));
-    y[localRowToStore][localColToStore + 3] = half(((yValues >> 24) & 0xFF) * (1.0f / 255.0f));
+    y[localRowToStore][localColToStore + 0] = STORAGE_TYPE(((yValues >>  0) & 0xFF) * (1.0f / 255.0f));
+    y[localRowToStore][localColToStore + 1] = STORAGE_TYPE(((yValues >>  8) & 0xFF) * (1.0f / 255.0f));
+    y[localRowToStore][localColToStore + 2] = STORAGE_TYPE(((yValues >> 16) & 0xFF) * (1.0f / 255.0f));
+    y[localRowToStore][localColToStore + 3] = STORAGE_TYPE(((yValues >> 24) & 0xFF) * (1.0f / 255.0f));
 
-    // For UV components, we only use half the threads.
+    // For UV components, we only use STORAGE_TYPE the threads.
     if (localId.x < 4) {
         /* For 1920x1080, we should load:
         /        0    1    2    3    4    5    6    7    8    9   ...   959
@@ -105,10 +107,10 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
         const uint uvByteRow = globalId.y * params.rowByteStride;
         const int4 uvSamples = Uint32ToUVInt(inputRawYuvFrame.Load(params.uvByteOffset + uvByteCol + uvByteRow));
 
-        u[localId.y][2 * localId.x + 0] = half(uvSamples[0] * (1.0f / 128.0f));
-        v[localId.y][2 * localId.x + 0] = half(uvSamples[1] * (1.0f / 128.0f));
-        u[localId.y][2 * localId.x + 1] = half(uvSamples[2] * (1.0f / 128.0f));
-        v[localId.y][2 * localId.x + 1] = half(uvSamples[3] * (1.0f / 128.0f));
+        u[localId.y][2 * localId.x + 0] = STORAGE_TYPE(uvSamples[0] * (1.0f / 128.0f));
+        v[localId.y][2 * localId.x + 0] = STORAGE_TYPE(uvSamples[1] * (1.0f / 128.0f));
+        u[localId.y][2 * localId.x + 1] = STORAGE_TYPE(uvSamples[2] * (1.0f / 128.0f));
+        v[localId.y][2 * localId.x + 1] = STORAGE_TYPE(uvSamples[3] * (1.0f / 128.0f));
     }
 
     GroupMemoryBarrierWithGroupSync();
@@ -161,13 +163,13 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
         localDctV += v[row][col] * coeff;
     }
 
-    dctY[localId.y + 0][localId.x + 0] = half(localDctY[0]);
-    dctY[localId.y + 0][localId.x + 8] = half(localDctY[1]);
-    dctY[localId.y + 8][localId.x + 0] = half(localDctY[2]);
-    dctY[localId.y + 8][localId.x + 8] = half(localDctY[3]);
+    dctY[localId.y + 0][localId.x + 0] = STORAGE_TYPE(localDctY[0]);
+    dctY[localId.y + 0][localId.x + 8] = STORAGE_TYPE(localDctY[1]);
+    dctY[localId.y + 8][localId.x + 0] = STORAGE_TYPE(localDctY[2]);
+    dctY[localId.y + 8][localId.x + 8] = STORAGE_TYPE(localDctY[3]);
 
-    dctU[localId.y][localId.x] = half(localDctU);
-    dctV[localId.y][localId.x] = half(localDctV);
+    dctU[localId.y][localId.x] = STORAGE_TYPE(localDctU);
+    dctV[localId.y][localId.x] = STORAGE_TYPE(localDctV);
 
     GroupMemoryBarrierWithGroupSync();
 
@@ -199,13 +201,13 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
 
     GroupMemoryBarrierWithGroupSync();
     
-    dctY[localId.y + 0][localId.x + 0] = half(localDctY2[0]);
-    dctY[localId.y + 0][localId.x + 8] = half(localDctY2[1]);
-    dctY[localId.y + 8][localId.x + 0] = half(localDctY2[2]);
-    dctY[localId.y + 8][localId.x + 8] = half(localDctY2[3]);
+    dctY[localId.y + 0][localId.x + 0] = STORAGE_TYPE(localDctY2[0]);
+    dctY[localId.y + 0][localId.x + 8] = STORAGE_TYPE(localDctY2[1]);
+    dctY[localId.y + 8][localId.x + 0] = STORAGE_TYPE(localDctY2[2]);
+    dctY[localId.y + 8][localId.x + 8] = STORAGE_TYPE(localDctY2[3]);
 
-    dctU[localId.y][localId.x] = half(localDctU2);
-    dctV[localId.y][localId.x] = half(localDctV2);
+    dctU[localId.y][localId.x] = STORAGE_TYPE(localDctU2);
+    dctV[localId.y][localId.x] = STORAGE_TYPE(localDctV2);
 #endif
 
     GroupMemoryBarrierWithGroupSync();
@@ -248,12 +250,12 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
         localV1 += dctV[row][col] * coeff;
     }
     
-    y[localId.y + 0][localId.x + 0] = half(localY1[0]);
-    y[localId.y + 0][localId.x + 8] = half(localY1[1]);
-    y[localId.y + 8][localId.x + 0] = half(localY1[2]);
-    y[localId.y + 8][localId.x + 8] = half(localY1[3]);
-    u[localId.y][localId.x] = half(localU1);
-    v[localId.y][localId.x] = half(localV1);
+    y[localId.y + 0][localId.x + 0] = STORAGE_TYPE(localY1[0]);
+    y[localId.y + 0][localId.x + 8] = STORAGE_TYPE(localY1[1]);
+    y[localId.y + 8][localId.x + 0] = STORAGE_TYPE(localY1[2]);
+    y[localId.y + 8][localId.x + 8] = STORAGE_TYPE(localY1[3]);
+    u[localId.y][localId.x] = STORAGE_TYPE(localU1);
+    v[localId.y][localId.x] = STORAGE_TYPE(localV1);
 
     GroupMemoryBarrierWithGroupSync();
 
@@ -271,8 +273,8 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
     
     GroupMemoryBarrierWithGroupSync();
 
-    u[localId.y][localId.x] = half(localU);
-    v[localId.y][localId.x] = half(localV);
+    u[localId.y][localId.x] = STORAGE_TYPE(localU);
+    v[localId.y][localId.x] = STORAGE_TYPE(localV);
 #endif
 
     GroupMemoryBarrierWithGroupSync();
