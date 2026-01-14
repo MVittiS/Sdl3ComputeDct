@@ -88,10 +88,10 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
     const uint localRowToStore = 2 * localId.y + uint(isLocalOddRow);
     const uint localColToStore = 4 * (localId.x - (isLocalOddRow ? 4 : 0));
 
-    y[localRowToStore][localColToStore + 0] = ((yValues >>  0) & 0xFF) * (1.0f / 255.0f);
-    y[localRowToStore][localColToStore + 1] = ((yValues >>  8) & 0xFF) * (1.0f / 255.0f);
-    y[localRowToStore][localColToStore + 2] = ((yValues >> 16) & 0xFF) * (1.0f / 255.0f);
-    y[localRowToStore][localColToStore + 3] = ((yValues >> 24) & 0xFF) * (1.0f / 255.0f);
+    y[localRowToStore][localColToStore + 0] = half(((yValues >>  0) & 0xFF) * (1.0f / 255.0f));
+    y[localRowToStore][localColToStore + 1] = half(((yValues >>  8) & 0xFF) * (1.0f / 255.0f));
+    y[localRowToStore][localColToStore + 2] = half(((yValues >> 16) & 0xFF) * (1.0f / 255.0f));
+    y[localRowToStore][localColToStore + 3] = half(((yValues >> 24) & 0xFF) * (1.0f / 255.0f));
 
     // For UV components, we only use half the threads.
     if (localId.x < 4) {
@@ -105,10 +105,10 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
         const uint uvByteRow = globalId.y * params.rowByteStride;
         const int4 uvSamples = Uint32ToUVInt(inputRawYuvFrame.Load(params.uvByteOffset + uvByteCol + uvByteRow));
 
-        u[localId.y][2 * localId.x + 0] = uvSamples[0] * (1.0f / 128.0f);
-        v[localId.y][2 * localId.x + 0] = uvSamples[1] * (1.0f / 128.0f);
-        u[localId.y][2 * localId.x + 1] = uvSamples[2] * (1.0f / 128.0f);
-        v[localId.y][2 * localId.x + 1] = uvSamples[3] * (1.0f / 128.0f);
+        u[localId.y][2 * localId.x + 0] = half(uvSamples[0] * (1.0f / 128.0f));
+        v[localId.y][2 * localId.x + 0] = half(uvSamples[1] * (1.0f / 128.0f));
+        u[localId.y][2 * localId.x + 1] = half(uvSamples[2] * (1.0f / 128.0f));
+        v[localId.y][2 * localId.x + 1] = half(uvSamples[3] * (1.0f / 128.0f));
     }
 
     GroupMemoryBarrierWithGroupSync();
@@ -161,13 +161,13 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
         localDctV += v[row][col] * coeff;
     }
 
-    dctY[localId.y + 0][localId.x + 0] = localDctY[0];
-    dctY[localId.y + 0][localId.x + 8] = localDctY[1];
-    dctY[localId.y + 8][localId.x + 0] = localDctY[2];
-    dctY[localId.y + 8][localId.x + 8] = localDctY[3];
+    dctY[localId.y + 0][localId.x + 0] = half(localDctY[0]);
+    dctY[localId.y + 0][localId.x + 8] = half(localDctY[1]);
+    dctY[localId.y + 8][localId.x + 0] = half(localDctY[2]);
+    dctY[localId.y + 8][localId.x + 8] = half(localDctY[3]);
 
-    dctU[localId.y][localId.x] = localDctU;
-    dctV[localId.y][localId.x] = localDctV;
+    dctU[localId.y][localId.x] = half(localDctU);
+    dctV[localId.y][localId.x] = half(localDctV);
 
     GroupMemoryBarrierWithGroupSync();
 
@@ -199,13 +199,13 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
 
     GroupMemoryBarrierWithGroupSync();
     
-    dctY[localId.y + 0][localId.x + 0] = localDctY2[0];
-    dctY[localId.y + 0][localId.x + 8] = localDctY2[1];
-    dctY[localId.y + 8][localId.x + 0] = localDctY2[2];
-    dctY[localId.y + 8][localId.x + 8] = localDctY2[3];
+    dctY[localId.y + 0][localId.x + 0] = half(localDctY2[0]);
+    dctY[localId.y + 0][localId.x + 8] = half(localDctY2[1]);
+    dctY[localId.y + 8][localId.x + 0] = half(localDctY2[2]);
+    dctY[localId.y + 8][localId.x + 8] = half(localDctY2[3]);
 
-    dctU[localId.y][localId.x] = localDctU2;
-    dctV[localId.y][localId.x] = localDctV2;
+    dctU[localId.y][localId.x] = half(localDctU2);
+    dctV[localId.y][localId.x] = half(localDctV2);
 #endif
 
     GroupMemoryBarrierWithGroupSync();
@@ -248,12 +248,12 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
         localV1 += dctV[row][col] * coeff;
     }
     
-    y[localId.y + 0][localId.x + 0] = localY1[0];
-    y[localId.y + 0][localId.x + 8] = localY1[1];
-    y[localId.y + 8][localId.x + 0] = localY1[2];
-    y[localId.y + 8][localId.x + 8] = localY1[3];
-    u[localId.y][localId.x] = localU1;
-    v[localId.y][localId.x] = localV1;
+    y[localId.y + 0][localId.x + 0] = half(localY1[0]);
+    y[localId.y + 0][localId.x + 8] = half(localY1[1]);
+    y[localId.y + 8][localId.x + 0] = half(localY1[2]);
+    y[localId.y + 8][localId.x + 8] = half(localY1[3]);
+    u[localId.y][localId.x] = half(localU1);
+    v[localId.y][localId.x] = half(localV1);
 
     GroupMemoryBarrierWithGroupSync();
 
@@ -271,8 +271,8 @@ void CSMain(uint3 globalId : SV_DispatchThreadId
     
     GroupMemoryBarrierWithGroupSync();
 
-    u[localId.y][localId.x] = localU;
-    v[localId.y][localId.x] = localV;
+    u[localId.y][localId.x] = half(localU);
+    v[localId.y][localId.x] = half(localV);
 #endif
 
     GroupMemoryBarrierWithGroupSync();

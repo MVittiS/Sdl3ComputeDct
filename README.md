@@ -69,7 +69,7 @@ Using the tools best supported by each vendor (Metal Debugger, PIX, and Nsight G
 | Intel  | UHD 630                   | Sep. 2017  | Intel 14nm |
 | NVIDIA | GeForce RTX 2060 (mobile) | Oct. 2018  | TSMC 12FFC |
 
-### Numbers
+### Baseline Numbers
 
 |    GPU    |  Power State  | Resolution  | Duration(µs) | MPixels/s |
 |-----------|---------------|-------------|--------------|-----------|
@@ -78,10 +78,26 @@ Using the tools best supported by each vendor (Metal Debugger, PIX, and Nsight G
 |           | Max Power     | 1920 x 1072 |          642 |    3'205  |
 |           |               | 3840 x 2160 |        2'580 |    3'214  |
 | UHD 630   | Low Power     | 1280 x 720  |        5'750 |      160  |
-|           |               | 3840 x 216  |       49'427 |      167  |
+|           |               | 3840 x 2160 |       49'427 |      167  |
 |           | High Power    | 1280 x 720  |        2'131 |      432  |
-|           |               | 3840 x 216  |       17'940 |      462  |
+|           |               | 3840 x 2160 |       17'940 |      462  |
 | RTX 2060  | Lock to Base  | 1280 x 720  |          628 |    1'468  |
-|           |               | 3840 x 216  |        5'128 |    1'617  |
+|           |               | 3840 x 2160 |        5'128 |    1'617  |
 |           | Lock to Boost | 1280 x 720  |          571 |    1'614  |
-|           |               | 3840 x 216  |        4'724 |    1'756  |
+|           |               | 3840 x 2160 |        4'724 |    1'756  |
+
+### Experiments (fixed to max power, 3840 x 2160)
+
+1. Separable DCT - do the DCT and IDCT transforms in two passes, using `groupshared` memory to pass data from one pass to another. Reduces the number of multiplications in an 8x8 block from 4096 (8^4, 64 per thread) to 1024 (2 * 8^3, 16 per thread) at the expense of more `groupshared` memory barriers.
+
+|  Experiments  |    GPU    | Duration(µs) | MPixels/s | Speedup |
+|---------------|-----------|--------------|-----------|---------|
+| 1             | M4        |          781 |    10'616 |  x3.303 |
+|               | UHD 630   |       37'754 |       220 |  x0.476 |
+|               | RTX 2060  |        3'787 |     2'190 |  x1.247 |
+|---------------|-----------|--------------|-----------|---------|
+
+### Future experiments
+
+2. Always use float variables instead of `half` to store elemens in `groupshared` memory. Trade `groupshared` capacity (limiting how many threadgroups can be launched in an SM/CU/XE) for a reduced instruction count, as the shader doesn't spend time converting between `half` and `float`. (not working on M4 due to SDL_shadercross not respecting `half` for Metal shaders).
+3. Coalesce `groupshared` variables to reduce memory barriers.
